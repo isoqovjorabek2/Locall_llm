@@ -21,6 +21,11 @@ log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31m[stop] %s\033[0m\n' "$*"; exit 1; }
 warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
 
+# `set -e` aborts on any unchecked failure, including inside a command
+# substitution, and does it without printing anything. This turns every such
+# exit into a located one instead of the script appearing to "just end".
+trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[1;31m[error] aborted at %s line %s (exit %s)\033[0m\n  The command on that line failed. Re-run with: bash -x scripts/download_models.sh\n" "${BASH_SOURCE[0]}" "${LINENO}" "$rc"; exit $rc' ERR
+
 # Under sudo these ~67 GB land in /root/.cache, where nothing else looks.
 if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
   die "Do not download with sudo -- ~67 GB would go to /root/.cache instead of
@@ -79,25 +84,35 @@ preflight_download() {
 
   # 1. Ownership. An earlier sudo run leaves a root-owned cache, and the
   #    resulting PermissionError appears only at the bottom of a long traceback.
-  mkdir -p "${HF_CACHE}" 2>/dev/null || true
-  if [ -e "${HF_CACHE}" ]; then
-    local owner
-    owner="$(stat -c '%U' "${HF_CACHE}" 2>/dev/null || echo '?')"
-    if [ ! -w "${HF_CACHE}" ]; then
-      die "${HF_CACHE} is not writable by $(id -un) (owner: ${owner}).
+  if ! mkdir -p "${HF_CACHE}" 2>/dev/null; then
+    die "Cannot create ${HF_CACHE}
+  (parent owner: $(stat -c '%U' "$(dirname "${HF_CACHE}")" 2>/dev/null || echo '?'))
+
+  Usually a root-owned ~/.cache from an earlier sudo run:
+      sudo bash scripts/setup_server.sh fix-perms"
+  fi
+
+  local owner="?"
+  owner="$(stat -c '%U' "${HF_CACHE}" 2>/dev/null)" || owner="?"
+  if [ ! -w "${HF_CACHE}" ]; then
+    die "${HF_CACHE} is not writable by $(id -un) (owner: ${owner}).
 
   An earlier sudo run created it as root. Hand it back:
       sudo bash scripts/setup_server.sh fix-perms"
-    fi
-    echo "  cache:  ${HF_CACHE}  (owner ${owner}, writable)"
   fi
+  echo "  cache:   ${HF_CACHE}  (owner ${owner}, writable)"
 
   # 2. Disk. 52 GB of safetensors plus 15 GB of GGUF, and HF needs room for
   #    partial .incomplete files alongside the finished blobs.
-  local avail_gib
-  avail_gib="$(df -PBG "${HF_CACHE}" 2>/dev/null | awk 'NR==2 {gsub("G","",$4); print $4}')"
-  if [ -n "${avail_gib}" ]; then
-    echo "  disk:   ${avail_gib} GiB free on $(df -P "${HF_CACHE}" | awk 'NR==2 {print $6}')"
+  #    df -Pk is POSIX and portable; -BG is not, and its failure under
+  #    `set -e` + pipefail used to abort this script with no message at all.
+  local avail_kb="" avail_gib="" mount=""
+  avail_kb="$(df -Pk "${HF_CACHE}" 2>/dev/null | awk 'NR==2 {print $4}')" || avail_kb=""
+  mount="$(df -Pk "${HF_CACHE}" 2>/dev/null | awk 'NR==2 {print $6}')" || mount=""
+
+  if [ -n "${avail_kb}" ] && [ "${avail_kb}" -eq "${avail_kb}" ] 2>/dev/null; then
+    avail_gib=$(( avail_kb / 1048576 ))
+    echo "  disk:    ${avail_gib} GiB free on ${mount:-?}"
     if [ "${avail_gib}" -lt "${need_gib}" ]; then
       die "Not enough disk: ${avail_gib} GiB free, need about ${need_gib} GiB.
 
@@ -105,10 +120,16 @@ preflight_download() {
       export HF_HOME=/path/with/room/huggingface
       bash scripts/download_models.sh"
     fi
+  else
+    warn "Could not read free space for ${HF_CACHE}; continuing without the check."
   fi
 
   # 3. Reachability. Fail here rather than inside a worker thread.
-  if ! curl -sfI --max-time 20 https://huggingface.co >/dev/null 2>&1; then
+  if curl -sfI --max-time 20 https://huggingface.co >/dev/null 2>&1; then
+    echo "  network: huggingface.co reachable"
+  elif curl -sfI --max-time 20 "${HF_ENDPOINT:-https://huggingface.co}" >/dev/null 2>&1; then
+    echo "  network: ${HF_ENDPOINT} reachable"
+  else
     die "Cannot reach huggingface.co.
 
   If this box needs a proxy:
@@ -116,7 +137,6 @@ preflight_download() {
   Or use a mirror:
       export HF_ENDPOINT=https://hf-mirror.com"
   fi
-  echo "  network: huggingface.co reachable"
   echo
 }
 
