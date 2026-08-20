@@ -84,17 +84,41 @@ Check you have the room first — you need **~70 GB** of disk for both weight se
 df -h ~ && free -h && nproc
 ```
 
+Check the toolchain before anything else — it tells you exactly what is missing:
+
+```bash
+bash scripts/setup_server.sh preflight
+```
+
 Then:
 
 ```bash
-bash scripts/setup_server.sh      # venv + torch(cu128) + deps, then builds llama.cpp with CUDA
+bash scripts/setup_server.sh      # venv + torch(cu128) + deps, then builds llama.cpp
 bash scripts/download_models.sh   # bf16 safetensors (~52 GB) + Q4_K_M GGUF (~15 GB)
 ```
 
-`setup_server.sh` builds llama.cpp for `sm_86` only (A40 is Ampere), which keeps the
-compile to a few minutes instead of half an hour. Run stages separately if you prefer:
-`bash scripts/setup_server.sh python` / `... llamacpp`, and
-`bash scripts/download_models.sh hf` / `... gguf`.
+**No root needed.** If `cmake` or `ninja` are missing, they are installed from PyPI —
+those wheels ship real binaries, so a locked-down server is fine. llama.cpp is built
+for `sm_86` only (A40 is Ampere), which keeps the compile to minutes rather than an hour.
+
+Run stages separately if you prefer: `bash scripts/setup_server.sh python` /
+`... llamacpp` / `... prebuilt`, and `bash scripts/download_models.sh hf` / `... gguf`.
+
+### Two things pip cannot fix
+
+**A C++ compiler.** If preflight reports no `g++`/`clang++`, check for a module system
+first (`module avail gcc && module load gcc`); otherwise you need an admin. In the
+meantime, `bash scripts/setup_server.sh prebuilt` fetches official CPU-only binaries so
+the CPU track and the Q4 Uzbek eval still run.
+
+**The CUDA toolkit.** `nvidia-smi` reporting "CUDA 13.2" is the **driver's** runtime
+version — it does *not* mean `nvcc` is installed, and `GGML_CUDA=ON` needs the real
+toolkit. Try `module avail cuda && module load cuda`. Without it the build falls back to
+CPU-only, which costs you Track A's GPU half; Track A's CPU half and all of Track B
+(transformers, which uses pip-installed CUDA via torch and needs no `nvcc`) still work.
+
+> There are no prebuilt **Linux CUDA** llama.cpp binaries published upstream — only CPU,
+> Vulkan, and SYCL — so GPU llama.cpp genuinely requires compiling from source.
 
 > **transformers version matters.** Gemma 4 needs a build that knows the `gemma4`
 > architecture and exposes `Gemma4ForConditionalGeneration`. If loading fails with an
@@ -227,10 +251,23 @@ can commit a finished report.
 **`KeyError: 'gemma4'` or unknown model type.** transformers is too old:
 `pip install -U transformers`.
 
-**llama.cpp built but no GPU offload.** Confirm it was compiled with CUDA —
-`llama-bench --help | grep -i ngl` should list the flag, and `-ngl 99` should show
-non-zero VRAM in `nvidia-smi` during a run. If not, rebuild:
-`bash scripts/setup_server.sh llamacpp`.
+**`cmake: command not found`.** Fixed automatically — `setup_server.sh` installs cmake
+and ninja from PyPI. If they land somewhere off `PATH`:
+
+```bash
+export PATH="$(python3 -c 'import sysconfig;print(sysconfig.get_path("scripts"))'):$PATH"
+```
+
+**CMake complains about minimum-version compatibility.** CMake 4 dropped support for
+projects declaring `cmake_minimum_required` below 3.5. Pin back a major version:
+`pip install "cmake<4"`.
+
+**llama.cpp built but no GPU offload.** A CPU-only build *accepts* `-ngl` and silently
+ignores it, so the "GPU" numbers would really be CPU numbers. `bench_llamacpp.py` guards
+against this: it samples VRAM before and during each GPU run and errors loudly if memory
+never moved, and `make_report.py` stamps a warning on the table rather than letting bad
+numbers through. If it fires, rebuild with the toolkit loaded:
+`module load cuda && bash scripts/setup_server.sh llamacpp`.
 
 **CPU run is far slower than expected.** llama.cpp degrades past *physical* cores;
 the scripts default to physical count via `lscpu`. Override with `--threads N`.

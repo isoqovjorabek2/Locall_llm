@@ -64,8 +64,41 @@ def parse_args():
     return p.parse_args()
 
 
+def current_vram_mib(gpu_index):
+    """Instantaneous VRAM use on one card, for the offload sanity check."""
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--id=" + str(gpu_index),
+             "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0:
+            return float(out.stdout.strip().splitlines()[0])
+    except (subprocess.SubprocessError, OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def has_cuda_backend(binary):
+    """Was this llama.cpp actually built with CUDA?
+
+    A CPU-only build still accepts -ngl and still runs -- it just ignores the
+    flag. Without this check the 'GPU' row would silently be CPU numbers.
+    """
+    try:
+        out = subprocess.run([binary, "--help"], capture_output=True, text=True, timeout=30)
+        blob = (out.stdout + out.stderr).lower()
+        if "cuda" in blob:
+            return True
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None  # unknown; the VRAM delta check below is the real arbiter
+
+
 def run_llama_bench(binary, gguf, n_prompt, n_gen, ngl, threads, repeats, gpu_index):
-    """Invoke llama-bench once, return (parsed_rows, telemetry_summary)."""
+    """Invoke llama-bench once, return (parsed_rows, telemetry_summary, wall)."""
     cmd = [
         binary,
         "-m", gguf,
@@ -85,28 +118,52 @@ def run_llama_bench(binary, gguf, n_prompt, n_gen, ngl, threads, repeats, gpu_in
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
         gpu_ids = [gpu_index]
 
+    baseline_vram = current_vram_mib(gpu_index) if ngl > 0 else None
+
     tele = Telemetry(gpu_indices=gpu_ids).start()
     start = time.perf_counter()
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     wall = time.perf_counter() - start
     tele.stop()
 
+    summary = tele.summary()
+
+    # Did the GPU run actually touch the GPU? A CPU-only llama.cpp accepts -ngl
+    # and reports success while quietly running everything on the CPU.
+    if ngl > 0:
+        peak = summary.get("peak_vram_mib")
+        if peak is not None and baseline_vram is not None:
+            delta = peak - baseline_vram
+            summary["vram_delta_mib"] = round(delta, 1)
+            summary["gpu_actually_used"] = delta > 500
+            if delta <= 500:
+                print(
+                    "[ERROR] -ngl " + str(ngl) + " was requested but VRAM on GPU "
+                    + str(gpu_index) + " rose only " + str(round(delta, 1)) + " MiB.\n"
+                    "        This llama.cpp is almost certainly a CPU-only build, so these\n"
+                    "        'GPU' numbers are really CPU numbers. Do not report them.\n"
+                    "        Rebuild with CUDA: bash scripts/setup_server.sh llamacpp",
+                    file=sys.stderr,
+                )
+        else:
+            summary["gpu_actually_used"] = None
+
     if proc.returncode != 0:
         print("[error] llama-bench failed:\n" + proc.stderr[-4000:], file=sys.stderr)
-        return [], tele.summary(), wall
+        return [], summary, wall
 
     # llama-bench -o json prints a JSON array; stderr carries the load logs.
     text = proc.stdout.strip()
     brace = text.find("[")
     if brace == -1:
         print("[error] no JSON in llama-bench output:\n" + text[:2000], file=sys.stderr)
-        return [], tele.summary(), wall
+        return [], summary, wall
     try:
         rows = json.loads(text[brace:])
     except json.JSONDecodeError as exc:
         print("[error] could not parse llama-bench JSON: " + str(exc), file=sys.stderr)
-        return [], tele.summary(), wall
-    return rows, tele.summary(), wall
+        return [], summary, wall
+    return rows, summary, wall
 
 
 def main():
@@ -126,6 +183,14 @@ def main():
     threads = args.threads or physical_cores()
     devices = [d.strip() for d in args.devices.split(",") if d.strip()]
     print("[info] gguf=" + gguf.name + " threads=" + str(threads) + " devices=" + str(devices))
+
+    if "gpu" in devices and has_cuda_backend(binary) is not True:
+        print(
+            "[warn] Could not confirm this llama-bench was built with CUDA.\n"
+            "       If it was not, the GPU rows will silently be CPU numbers.\n"
+            "       The VRAM check after each GPU run will tell you for certain.",
+            file=sys.stderr,
+        )
 
     records = []
     for device in devices:

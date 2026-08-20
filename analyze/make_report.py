@@ -86,6 +86,19 @@ def section_track_a() -> str:
         "ratio below is a clean hardware measurement.\n"
     )
 
+    # A CPU-only llama.cpp accepts -ngl and ignores it, which would make the
+    # "GPU" rows meaningless. bench_llamacpp.py records whether VRAM moved.
+    gpu_rows = [r for r in rows if r["device"] == "gpu"]
+    if gpu_rows and all(
+        r["telemetry"].get("gpu_actually_used") is False for r in gpu_rows
+    ):
+        parts.append(
+            "> **These GPU numbers are not real.** VRAM never rose during the GPU runs, "
+            "so this llama.cpp was built without CUDA and `-ngl` was ignored -- the GPU "
+            "column below is CPU output. Rebuild with "
+            "`bash scripts/setup_server.sh llamacpp` and re-run before citing anything here.\n"
+        )
+
     by = defaultdict(dict)
     for r in rows:
         by[r["case"]][r["device"]] = r
