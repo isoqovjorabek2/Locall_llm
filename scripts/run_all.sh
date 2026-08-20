@@ -37,7 +37,15 @@ if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
       bash scripts/run_all.sh"
 fi
 
-if [ ! -f "${REPO_ROOT}/.venv/bin/activate" ]; then
+if [ ! -x "${REPO_ROOT}/.venv/bin/python" ]; then
+  if [ -n "${VIRTUAL_ENV:-}" ]; then
+    die "Your shell shows an active venv (${VIRTUAL_ENV}) but ${REPO_ROOT}/.venv/bin/python
+  does not exist -- it was deleted while still activated, so the prompt and PATH
+  are stale and everything falls through to the system python.
+
+      deactivate
+      bash scripts/setup_server.sh python"
+  fi
   die "No venv at ${REPO_ROOT}/.venv
       Run first: bash scripts/setup_server.sh"
 fi

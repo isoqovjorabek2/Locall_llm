@@ -205,6 +205,13 @@ setup_python() {
     die "Existing venv at ${VENV} is not writable. Run: sudo bash scripts/setup_server.sh fix-perms"
   fi
 
+  # Rebuilding the venv you are standing inside leaves the shell pointing at
+  # paths that are about to be replaced.
+  if [ -n "${VIRTUAL_ENV:-}" ]; then
+    warn "A venv is active in this shell (${VIRTUAL_ENV})."
+    warn "Run 'deactivate' first if anything behaves oddly after this."
+  fi
+
   log "Creating virtualenv at ${VENV}"
   python3 -m venv "${VENV}"
   # shellcheck disable=SC1091
@@ -406,9 +413,12 @@ fix_perms() {
   log "Handing ownership back to ${target_user}:${target_group}"
 
   local path
+  # ~/.cache itself matters: if the parent is root-owned, creating
+  # ~/.cache/huggingface fails even when the subdirectory does not exist yet.
   for path in \
       "${REPO_ROOT}" \
       "${target_home}/llama.cpp" \
+      "${target_home}/.cache" \
       "${target_home}/.cache/huggingface" \
       "${target_home}/.cache/pip" \
       "${target_home}/.local"; do

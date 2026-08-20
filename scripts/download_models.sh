@@ -30,12 +30,43 @@ if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
       bash scripts/download_models.sh"
 fi
 
-if [ -d "${REPO_ROOT}/.venv" ]; then
-  # shellcheck disable=SC1091
-  source "${REPO_ROOT}/.venv/bin/activate"
+# A "(.venv)" prompt does NOT prove the venv exists -- if it was deleted while
+# still activated (fix-perms does exactly that), the prompt and PATH survive but
+# every tool silently falls through to the system python. That is what produces
+# pip's "externally-managed-environment" error on Debian/Ubuntu.
+VENV_PY="${REPO_ROOT}/.venv/bin/python"
+
+if [ ! -x "${VENV_PY}" ]; then
+  if [ -n "${VIRTUAL_ENV:-}" ]; then
+    die "Your shell shows an active venv (${VIRTUAL_ENV}) but ${VENV_PY}
+  does not exist -- the venv was deleted while still activated, so pip and
+  python are silently resolving to the SYSTEM python. That is the
+  'externally-managed-environment' error.
+
+  Leave the stale environment and rebuild:
+      deactivate
+      bash scripts/setup_server.sh python
+      bash scripts/download_models.sh"
+  fi
+  die "No virtualenv at ${REPO_ROOT}/.venv
+      Run first: bash scripts/setup_server.sh"
 fi
 
-command -v hf >/dev/null 2>&1 || pip install --quiet "huggingface_hub[cli]"
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/.venv/bin/activate"
+
+# Always go through the venv's interpreter explicitly. `pip` alone can resolve
+# to /usr/bin/pip if PATH is stale, and on Ubuntu 24.04 that is PEP 668-blocked.
+if ! "${VENV_PY}" -c "import huggingface_hub" >/dev/null 2>&1; then
+  log "Installing huggingface_hub into the venv"
+  "${VENV_PY}" -m pip install --quiet "huggingface_hub[cli]"
+fi
+
+# Same reason: call the CLI through the venv rather than trusting PATH.
+hf() { "${VENV_PY}" -m huggingface_hub.cli.hf "$@"; }
+if ! "${VENV_PY}" -m huggingface_hub.cli.hf --help >/dev/null 2>&1; then
+  hf() { "${REPO_ROOT}/.venv/bin/hf" "$@"; }
+fi
 
 HF_CACHE="${HF_HOME:-${HOME}/.cache/huggingface}"
 
