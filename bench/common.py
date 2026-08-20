@@ -165,14 +165,35 @@ def require_gemma4_support():
                 "    " + mod.ljust(14) + " MISSING (" + type(exc).__name__ + ")"
             )
 
-    hint = ""
-    if missing and "torchvision" in str(missing):
+    # A torch/torchvision ABI mismatch is not a missing module: torchvision is
+    # present but its compiled extension was linked against a different torch,
+    # so its custom operators never register. Reinstalling torchvision alone
+    # does not fix it -- the pair has to come from one index together.
+    root_text = str(root) + " " + str(model_class_error)
+    abi_mismatch = (
+        "does not exist" in root_text and "torchvision::" in root_text
+    ) or "undefined symbol" in root_text
+
+    if abi_mismatch:
+        hint = (
+            "\nThis is a torch/torchvision ABI MISMATCH, not a missing package.\n"
+            "torchvision is installed, but its compiled extension was built against\n"
+            "a different torch, so operators like torchvision::nms never register.\n"
+            "Reinstalling torchvision on its own will not fix it -- install the pair\n"
+            "together from one index:\n\n"
+            "  source .venv/bin/activate\n"
+            "  pip install --force-reinstall --no-cache-dir torch torchvision \\\n"
+            "      --index-url https://download.pytorch.org/whl/cu128\n"
+        )
+    elif missing and "torchvision" in str(missing):
         hint = (
             "\ntorchvision is the one to install, matching your torch build:\n"
             "  source .venv/bin/activate\n"
-            "  pip install torchvision --index-url "
+            "  pip install torch torchvision --index-url "
             "https://download.pytorch.org/whl/cu128\n"
         )
+    else:
+        hint = ""
 
     sys.exit(
         "transformers " + version + " is new enough for Gemma 4 (>= "

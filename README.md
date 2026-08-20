@@ -327,6 +327,20 @@ can commit a finished report.
 **CUDA OOM on load.** bf16 needs both cards. Either use `--gpus 0,1`, or drop to
 `--load-4bit` on one. If someone else's job grew, raise `--reserve-mib`.
 
+**`RuntimeError: operator torchvision::nms does not exist`** (or `undefined symbol`).
+torch and torchvision are mismatched — torchvision is installed, but its compiled
+extension was built against a different torch, so its operators never register.
+Reinstalling torchvision alone will not fix it; the pair must come from one index:
+
+```bash
+pip install --force-reinstall --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu128
+```
+
+This is why `torch` and `torchvision` are **not** in `requirements.txt` — listing them
+there makes pip resolve torchvision from PyPI, which is exactly how the mismatch
+happens. `setup_server.sh` installs both together from the CUDA index and then checks
+that `torch.ops.torchvision.nms` actually registered.
+
 **`Could not import module 'Gemma4Processor'`** (or `KeyError: 'gemma4'`). transformers
 is older than 5.5.0, the release that added Gemma 4:
 

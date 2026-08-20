@@ -242,14 +242,33 @@ setup_python() {
   log "Installing the rest of requirements.txt"
   pip install -r "${REPO_ROOT}/requirements.txt"
 
-  log "Verifying GPU visibility"
+  log "Verifying torch, torchvision and GPU visibility"
   python - <<'PY'
+import sys
 import torch
-print("torch:", torch.__version__)
+print("torch:       ", torch.__version__)
 print("cuda available:", torch.cuda.is_available())
 for i in range(torch.cuda.device_count()):
     p = torch.cuda.get_device_properties(i)
     print(f"  GPU {i}: {p.name}  {p.total_memory / 1024**3:.1f} GiB  sm_{p.major}{p.minor}")
+
+# torchvision must not merely import -- its compiled operators must register
+# against THIS torch. A mismatched pair fails here, not at install time.
+try:
+    import torchvision
+    print("torchvision: ", torchvision.__version__)
+    torch.ops.torchvision.nms  # noqa: B018 - probing operator registration
+    print("torchvision ops: registered OK")
+except Exception as exc:
+    print("
+TORCHVISION IS BROKEN AGAINST THIS TORCH:", file=sys.stderr)
+    print("  " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+    print("
+Install the pair together from one index:", file=sys.stderr)
+    print("  pip install --force-reinstall --no-cache-dir torch torchvision \\",
+          file=sys.stderr)
+    print("      --index-url https://download.pytorch.org/whl/cu128", file=sys.stderr)
+    sys.exit(1)
 PY
 }
 

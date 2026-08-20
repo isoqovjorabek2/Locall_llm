@@ -1,9 +1,17 @@
+# NOTE: torch and torchvision are deliberately NOT listed here.
+#
+# torchvision ships a compiled extension linked against one exact torch build.
+# Listing it in this file makes pip resolve it from PyPI, which can pull a wheel
+# built against a different torch than the CUDA-index torch already installed --
+# giving "RuntimeError: operator torchvision::nms does not exist" at import.
+# They must be installed together, from the same index:
+#
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#
+# scripts/setup_server.sh does this. torchvision is required, not optional:
+# Gemma 4 is multimodal and Gemma4Processor imports torchvision.transforms.v2.
+
 # Core inference (GPU track)
-torch>=2.6.0
-# Gemma 4 is multimodal: Gemma4Processor -> image_processing_gemma4 imports
-# torchvision.transforms.v2. Without it transformers reports the unhelpful
-# "Could not import module 'Gemma4Processor'" rather than the real cause.
-torchvision>=0.21.0
 # Gemma 4 (model_type "gemma4", Gemma4Processor / Gemma4ForConditionalGeneration)
 # landed in transformers 5.5.0. Anything older resolves the processor class to
 # nothing and dies with "Could not import module 'Gemma4Processor'".
