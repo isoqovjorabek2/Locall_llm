@@ -67,11 +67,16 @@ if ! "${VENV_PY}" -c "import huggingface_hub" >/dev/null 2>&1; then
   "${VENV_PY}" -m pip install --quiet "huggingface_hub[cli]"
 fi
 
-# Same reason: call the CLI through the venv rather than trusting PATH.
-hf() { "${VENV_PY}" -m huggingface_hub.cli.hf "$@"; }
-if ! "${VENV_PY}" -m huggingface_hub.cli.hf --help >/dev/null 2>&1; then
-  hf() { "${REPO_ROOT}/.venv/bin/hf" "$@"; }
+# Same reason: call the venv's own hf binary by absolute path rather than
+# trusting PATH. (`python -m huggingface_hub.cli.hf` is not a reliable entry
+# point -- the module has no __main__ guard in every release.)
+HF_BIN="${REPO_ROOT}/.venv/bin/hf"
+if [ ! -x "${HF_BIN}" ]; then
+  die "huggingface_hub is installed but ${HF_BIN} is missing.
+      Reinstall the CLI extra:
+          ${VENV_PY} -m pip install -U 'huggingface_hub[cli]'"
 fi
+hf() { "${HF_BIN}" "$@"; }
 
 HF_CACHE="${HF_HOME:-${HOME}/.cache/huggingface}"
 
