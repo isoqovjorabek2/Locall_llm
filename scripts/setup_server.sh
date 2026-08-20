@@ -235,8 +235,9 @@ setup_python() {
   source "${VENV}/bin/activate"
   pip install --upgrade pip wheel
 
-  log "Installing PyTorch (CUDA 12.8 wheels work on the 595.x driver)"
-  pip install torch --index-url https://download.pytorch.org/whl/cu128
+  log "Installing PyTorch + torchvision (CUDA 12.8 wheels work on the 595.x driver)"
+  # torchvision is not optional: Gemma 4 is multimodal and its processor imports it.
+  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
   log "Installing the rest of requirements.txt"
   pip install -r "${REPO_ROOT}/requirements.txt"

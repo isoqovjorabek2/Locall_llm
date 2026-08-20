@@ -1,5 +1,9 @@
 # Core inference (GPU track)
 torch>=2.6.0
+# Gemma 4 is multimodal: Gemma4Processor -> image_processing_gemma4 imports
+# torchvision.transforms.v2. Without it transformers reports the unhelpful
+# "Could not import module 'Gemma4Processor'" rather than the real cause.
+torchvision>=0.21.0
 # Gemma 4 (model_type "gemma4", Gemma4Processor / Gemma4ForConditionalGeneration)
 # landed in transformers 5.5.0. Anything older resolves the processor class to
 # nothing and dies with "Could not import module 'Gemma4Processor'".

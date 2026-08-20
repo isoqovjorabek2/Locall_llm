@@ -51,11 +51,43 @@ def require_gemma4_support():
         )
 
     version = getattr(transformers, "__version__", "unknown")
+
+    have_model_class = True
     try:
         from transformers import Gemma4ForConditionalGeneration  # noqa: F401
-        return version
     except ImportError:
-        pass
+        have_model_class = False
+
+    if have_model_class:
+        # The model class existing is not enough. Gemma 4 is multimodal, and
+        # Gemma4Processor pulls in torchvision. When that is missing,
+        # transformers swallows the real ImportError and reports
+        # "Could not import module 'Gemma4Processor'", which sends you looking
+        # at the wrong library entirely. Import the processor here so the
+        # missing peer dependency is named.
+        try:
+            from transformers.models.gemma4 import processing_gemma4  # noqa: F401
+            return version
+        except ImportError as exc:
+            missing = getattr(exc, "name", None) or str(exc)
+            hint = ""
+            if "torchvision" in str(exc):
+                hint = (
+                    "\nInstall it from the same index as torch:\n"
+                    "  source .venv/bin/activate\n"
+                    "  pip install torchvision --index-url "
+                    "https://download.pytorch.org/whl/cu128\n"
+                )
+            sys.exit(
+                "transformers " + version + " has Gemma 4, but its processor "
+                "cannot be imported.\n\n"
+                "  missing module: " + str(missing) + "\n"
+                "  raised by:      transformers/models/gemma4/processing_gemma4.py\n\n"
+                "Gemma 4 is multimodal, so the processor needs the vision stack even "
+                "for text-only use.\n" + hint +
+                "\nOr reinstall everything:\n"
+                "  pip install -r requirements.txt"
+            )
 
     sys.exit(
         "This transformers is too old for Gemma 4.\n\n"
