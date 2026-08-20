@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-script}")/.." && pwd)"
 MODELS_DIR="${REPO_ROOT}/models"
 HF_MODEL="google/gemma-4-26B-A4B-it"
 GGUF_REPO="${GGUF_REPO:-ggml-org/gemma-4-26b-a4b-it-GGUF}"
@@ -24,7 +24,7 @@ warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
 # `set -e` aborts on any unchecked failure, including inside a command
 # substitution, and does it without printing anything. This turns every such
 # exit into a located one instead of the script appearing to "just end".
-trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[1;31m[error] aborted at %s line %s (exit %s)\033[0m\n  The command on that line failed. Re-run with: bash -x scripts/download_models.sh\n" "${BASH_SOURCE[0]}" "${LINENO}" "$rc"; exit $rc' ERR
+trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[1;31m[error] aborted at %s line %s (exit %s)\033[0m\n  The command on that line failed. Re-run with: bash -x scripts/download_models.sh\n" "${BASH_SOURCE[0]:-script}" "${LINENO:-?}" "$rc"; exit $rc' ERR
 
 # Under sudo these ~67 GB land in /root/.cache, where nothing else looks.
 if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then

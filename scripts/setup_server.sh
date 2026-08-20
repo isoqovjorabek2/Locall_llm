@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-script}")/.." && pwd)"
 VENV="${REPO_ROOT}/.venv"
 LLAMA_DIR="${LLAMA_CPP_DIR:-${HOME}/llama.cpp}"
 STAGE="${1:-all}"
@@ -26,6 +26,22 @@ warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ok\033[0m   %s\n' "$*"; }
 bad()  { printf '\033[1;31m  MISSING\033[0m %s\n' "$*"; }
 die()  { printf '\n\033[1;31m[stop] %s\033[0m\n' "$*"; exit 1; }
+
+# Under `set -e` with pipefail, a failing pipeline inside a command substitution
+# aborts the script silently. This turns any such exit into a located one.
+trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[1;31m[error] aborted at %s line %s (exit %s)\033[0m\n  Re-run with: bash -x %s %s\n" "${BASH_SOURCE[0]:-script}" "${LINENO:-?}" "$rc" "${BASH_SOURCE[0]:-script}" "${STAGE:-}"; exit $rc' ERR
+
+# First line of a command's output, never failing the caller. Version probes
+# like `foo --version | head -1` are informational; they must not kill the run.
+brief() { { "$@" 2>&1 || true; } | head -1 || true; }
+
+# grep exits 1 when it matches nothing, which under `set -e` aborted preflight
+# on any nvcc whose --version wording differs.
+nvcc_release() {
+  local out
+  out="$( { "$1" --version 2>&1 || true; } | grep -o 'release [0-9.]*' | head -1 )" || out=""
+  printf '%s' "${out:-version unknown}"
+}
 
 # Do NOT create the venv or download weights as root. Under sudo the venv ends up
 # root-owned (later non-sudo pip installs fail) and ~52 GB of Hugging Face weights
@@ -115,7 +131,7 @@ preflight() {
   if command -v git >/dev/null 2>&1; then ok "git      $(git --version)"; else bad "git"; missing=1; fi
 
   if command -v cmake >/dev/null 2>&1; then
-    ok "cmake    $(cmake --version | head -1)"
+    ok "cmake    $(brief cmake --version)"
   else
     bad "cmake  -> will be installed from PyPI (no root needed)"
   fi
@@ -123,14 +139,14 @@ preflight() {
   if command -v ninja >/dev/null 2>&1; then
     ok "ninja    $(ninja --version)"
   elif command -v make >/dev/null 2>&1; then
-    ok "make     $(make --version | head -1)  (ninja will be installed for speed)"
+    ok "make     $(brief make --version)  (ninja will be installed for speed)"
   else
     bad "ninja/make -> ninja will be installed from PyPI"
   fi
 
   local cxx
   if cxx="$(find_compiler)"; then
-    ok "C++      ${cxx}  ($(${cxx} --version 2>&1 | head -1))"
+    ok "C++      ${cxx}  ($(brief "${cxx}" --version))"
   else
     bad "g++/clang++  -- a C++ compiler CANNOT be pip-installed."
     warn "Ask the admin for build-essential, or load a module: 'module avail gcc'"
@@ -139,7 +155,7 @@ preflight() {
 
   local nvcc
   if nvcc="$(find_nvcc)"; then
-    ok "nvcc     ${nvcc}  ($(${nvcc} --version 2>&1 | grep -o 'release [0-9.]*' | head -1))"
+    ok "nvcc     ${nvcc}  ($(nvcc_release "${nvcc}"))"
   else
     bad "nvcc  -- CUDA toolkit not found"
     warn "nvidia-smi showing 'CUDA 13.2' is the DRIVER version, not a toolkit."
@@ -249,7 +265,7 @@ ensure_build_tools() {
       return 1
     }
   fi
-  ok "cmake  $(cmake --version | head -1)"
+  ok "cmake  $(brief cmake --version)"
 
   if ! command -v ninja >/dev/null 2>&1 && ! command -v make >/dev/null 2>&1; then
     log "No ninja or make -- installing ninja from PyPI"
@@ -379,7 +395,7 @@ setup_cuda() {
   apt-get install -y "cuda-toolkit-${version}"
 
   if [ -x "/usr/local/cuda-${dotted}/bin/nvcc" ]; then
-    log "Installed $(/usr/local/cuda-${dotted}/bin/nvcc --version | grep -o 'release [0-9.]*')"
+    log "Installed $(nvcc_release "/usr/local/cuda-${dotted}/bin/nvcc")"
     echo
     echo "Now, as yourself (NOT root):"
     echo "  export CUDA_HOME=/usr/local/cuda-${dotted}"
@@ -407,14 +423,17 @@ fix_perms() {
   fi
 
   local target_group target_home
-  target_group="$(id -gn "${target_user}")"
-  target_home="$(getent passwd "${target_user}" | cut -d: -f6)"
+  target_group="$(id -gn "${target_user}" 2>/dev/null)" || target_group="${target_user}"
+  target_home="$(getent passwd "${target_user}" 2>/dev/null | cut -d: -f6)" || target_home=""
+  [ -n "${target_home}" ] || target_home="/home/${target_user}"
+  [ -d "${target_home}" ] || die "Home directory for ${target_user} not found at ${target_home}"
 
-  log "Handing ownership back to ${target_user}:${target_group}"
+  log "Repairing ownership for ${target_user}:${target_group}"
 
-  local path
+  local path changed=0 venv_was_root=0
   # ~/.cache itself matters: if the parent is root-owned, creating
   # ~/.cache/huggingface fails even when the subdirectory does not exist yet.
+  # Missing paths are simply skipped -- absent is not the same as broken.
   for path in \
       "${REPO_ROOT}" \
       "${target_home}/llama.cpp" \
@@ -422,31 +441,46 @@ fix_perms() {
       "${target_home}/.cache/huggingface" \
       "${target_home}/.cache/pip" \
       "${target_home}/.local"; do
-    if [ -e "${path}" ]; then
-      local owner
-      owner="$(stat -c '%U' "${path}" 2>/dev/null || echo '?')"
-      if [ "${owner}" = "${target_user}" ]; then
-        ok "already ${target_user}: ${path}"
-      else
-        chown -R "${target_user}:${target_group}" "${path}"
-        ok "chowned (was ${owner}): ${path}"
-      fi
+    if [ ! -e "${path}" ]; then
+      printf '  --   absent, nothing to do: %s\n' "${path}"
+      continue
+    fi
+    local owner
+    owner="$(stat -c '%U' "${path}" 2>/dev/null)" || owner="?"
+    if [ "${owner}" = "${target_user}" ]; then
+      ok "already ${target_user}: ${path}"
+    else
+      chown -R "${target_user}:${target_group}" "${path}"
+      ok "chowned (was ${owner}): ${path}"
+      changed=1
+      [ "${path}" = "${REPO_ROOT}" ] && venv_was_root=1
     fi
   done
 
-  # A root-created venv hardcodes root paths and can be subtly broken even once
-  # chowned, so remove it and let the python stage build a clean one.
+  # Only discard a venv that root actually created. A healthy user-owned venv
+  # must be left alone: deleting it while it is activated in some shell leaves
+  # $VIRTUAL_ENV and $PATH pointing at nothing, and every later python/pip call
+  # falls through to the system interpreter.
   if [ -d "${REPO_ROOT}/.venv" ]; then
-    warn "Removing ${REPO_ROOT}/.venv -- a root-created venv is not reliably"
-    warn "repaired by chown alone. The python stage will rebuild it."
-    rm -rf "${REPO_ROOT}/.venv"
+    local venv_owner
+    venv_owner="$(stat -c '%U' "${REPO_ROOT}/.venv" 2>/dev/null)" || venv_owner="?"
+    if [ "${venv_owner}" = "root" ] || [ "${venv_was_root}" -eq 1 ]; then
+      warn "Removing ${REPO_ROOT}/.venv -- it was created by root, and chown alone"
+      warn "does not reliably repair a venv. Rebuild it with:"
+      warn "    bash scripts/setup_server.sh python"
+      warn "If it is active in any shell, run 'deactivate' there first."
+      rm -rf "${REPO_ROOT}/.venv"
+      changed=1
+    else
+      ok "venv is ${venv_owner}-owned and healthy: left untouched"
+    fi
   fi
 
   # Weights in /root/.cache are stranded: not the user's, and not where the
   # scripts look. Point them out rather than silently leaving ~52 GB behind.
   if [ -d /root/.cache/huggingface ]; then
     local sz
-    sz="$(du -sh /root/.cache/huggingface 2>/dev/null | cut -f1)"
+    sz="$(du -sh /root/.cache/huggingface 2>/dev/null | cut -f1)" || sz="?"
     warn "/root/.cache/huggingface exists (${sz}) -- weights downloaded as root."
     warn "To reclaim instead of re-downloading:"
     warn "  mv /root/.cache/huggingface ${target_home}/.cache/"
@@ -454,13 +488,21 @@ fix_perms() {
   fi
 
   echo
-  log "Done. Now run as yourself, without sudo:"
-  echo "  bash scripts/setup_server.sh"
+  if [ "${changed}" -eq 0 ]; then
+    log "Nothing needed repairing -- no root-owned files found."
+    echo "  Permissions are not your problem. Carry on as yourself:"
+    echo "      bash scripts/download_models.sh"
+  else
+    log "Done. Now run as yourself, without sudo:"
+    echo "      bash scripts/setup_server.sh"
+  fi
 }
 
 # ---------------------------------------------------------------------------
 case "${STAGE}" in
-  preflight)  preflight ;;
+  # `|| exit` keeps the ERR trap quiet: preflight returning 1 means "something
+  # is missing", which is a reportable result, not a crash.
+  preflight)  preflight || exit $? ;;
   cuda)       setup_cuda ;;
   fix-perms)  fix_perms ;;
   python)    refuse_sudo; setup_python ;;

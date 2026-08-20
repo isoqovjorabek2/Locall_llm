@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-script}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 MODELS_DIR="${REPO_ROOT}/models"
@@ -24,6 +24,10 @@ GPU_FOR_LLAMACPP="${GPU_FOR_LLAMACPP:-1}"
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
 die()  { printf '\n\033[1;31m[stop] %s\033[0m\n' "$*"; exit 1; }
+
+# A failing pipeline inside a command substitution aborts `set -e` scripts
+# silently. Report where, instead of the run appearing to stop for no reason.
+trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[1;31m[error] aborted at %s line %s (exit %s)\033[0m\n  Re-run with: bash -x scripts/run_all.sh\n" "${BASH_SOURCE[0]:-script}" "${LINENO:-?}" "$rc"; exit $rc' ERR
 
 # Under sudo, HOME becomes /root, so LLAMA_DIR resolves to /root/llama.cpp and
 # the whole run looks for binaries and caches in the wrong place.
