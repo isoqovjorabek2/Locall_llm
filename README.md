@@ -129,6 +129,14 @@ Then, as yourself:
 bash scripts/setup_server.sh
 ```
 
+**Weights already downloaded as root?** If an earlier sudo run pulled them into
+`/root/.cache/huggingface`, move them across instead of re-downloading tens of GB:
+
+```bash
+sudo bash scripts/setup_server.sh reclaim
+```
+
+
 ### Two things pip cannot fix
 
 **A C++ compiler.** If preflight reports no `g++`/`clang++`, check for a module system

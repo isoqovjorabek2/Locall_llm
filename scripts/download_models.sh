@@ -89,12 +89,28 @@ preflight_download() {
 
   # 1. Ownership. An earlier sudo run leaves a root-owned cache, and the
   #    resulting PermissionError appears only at the bottom of a long traceback.
-  if ! mkdir -p "${HF_CACHE}" 2>/dev/null; then
+  # Show what mkdir actually said. Swallowing its stderr turns a precise error
+  # ("Permission denied", "Disk quota exceeded", "Read-only file system") into
+  # a guess, and the reported "parent" is misleading when the parent is also
+  # missing -- dirname of a missing path is not the thing that blocked you.
+  local mkerr=""
+  if ! mkerr="$(mkdir -p "${HF_CACHE}" 2>&1)"; then
+    local probe="${HF_CACHE}" existing=""
+    while [ "${probe}" != "/" ] && [ -n "${probe}" ]; do
+      if [ -e "${probe}" ]; then existing="${probe}"; break; fi
+      probe="$(dirname "${probe}")"
+    done
     die "Cannot create ${HF_CACHE}
-  (parent owner: $(stat -c '%U' "$(dirname "${HF_CACHE}")" 2>/dev/null || echo '?'))
 
-  Usually a root-owned ~/.cache from an earlier sudo run:
-      sudo bash scripts/setup_server.sh fix-perms"
+  mkdir said:        ${mkerr:-(no message)}
+  deepest existing:  ${existing:-/}  (owner $(stat -c '%U' "${existing:-/}" 2>/dev/null || echo '?'), \
+mode $(stat -c '%a' "${existing:-/}" 2>/dev/null || echo '?'))
+  you are:           $(id -un) ($(id -u)), groups: $(id -Gn 2>/dev/null || echo '?')
+
+  If that directory is root-owned:
+      sudo bash scripts/setup_server.sh fix-perms
+  If it is a quota or read-only mount, put the cache somewhere you can write:
+      export HF_HOME=/some/writable/path/huggingface"
   fi
 
   local owner="?"

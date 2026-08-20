@@ -8,6 +8,7 @@
 #   bash scripts/setup_server.sh prebuilt    # skip building: fetch CPU-only binaries
 #   sudo bash scripts/setup_server.sh cuda       # install CUDA toolkit (needs root)
 #   sudo bash scripts/setup_server.sh fix-perms  # undo an earlier sudo run
+#   sudo bash scripts/setup_server.sh reclaim    # move root-downloaded weights to you
 #
 # Run every stage as YOURSELF. Only `cuda` and `fix-perms` take sudo -- the others
 # refuse to run as root, because a root-created venv breaks later pip installs and
@@ -476,15 +477,27 @@ fix_perms() {
     fi
   fi
 
+  # Create ~/.cache while we still have root. If the user could not create it
+  # themselves, printing advice does not help; making it and handing it over does.
+  if [ ! -e "${target_home}/.cache" ]; then
+    if mkdir -p "${target_home}/.cache" 2>/dev/null; then
+      chown "${target_user}:${target_group}" "${target_home}/.cache"
+      ok "created ${target_home}/.cache and gave it to ${target_user}"
+      changed=1
+    else
+      warn "Could not create ${target_home}/.cache even as root."
+      warn "Check the mount: $(findmnt -no TARGET,OPTIONS --target "${target_home}" 2>/dev/null || echo '?')"
+    fi
+  fi
+
   # Weights in /root/.cache are stranded: not the user's, and not where the
-  # scripts look. Point them out rather than silently leaving ~52 GB behind.
+  # scripts look. Report them; `reclaim` moves them.
   if [ -d /root/.cache/huggingface ]; then
     local sz
     sz="$(du -sh /root/.cache/huggingface 2>/dev/null | cut -f1)" || sz="?"
     warn "/root/.cache/huggingface exists (${sz}) -- weights downloaded as root."
-    warn "To reclaim instead of re-downloading:"
-    warn "  mv /root/.cache/huggingface ${target_home}/.cache/"
-    warn "  chown -R ${target_user}:${target_group} ${target_home}/.cache/huggingface"
+    warn "Move them to ${target_user} instead of downloading again:"
+    warn "    sudo bash scripts/setup_server.sh reclaim"
   fi
 
   echo
@@ -498,6 +511,55 @@ fix_perms() {
   fi
 }
 
+# Move weights that were downloaded as root into the user's cache, rather than
+# re-downloading tens of GB. Needs root: only root can move out of /root.
+reclaim() {
+  if [ "$(id -u)" -ne 0 ]; then
+    die "This stage moves files out of /root and needs root:
+      sudo bash scripts/setup_server.sh reclaim"
+  fi
+
+  local target_user="${SUDO_USER:-}"
+  if [ -z "${target_user}" ] || [ "${target_user}" = "root" ]; then
+    die "Cannot tell which user to hand the weights to.
+      Invoke via sudo from your normal account."
+  fi
+
+  local target_group target_home src dst
+  target_group="$(id -gn "${target_user}" 2>/dev/null)" || target_group="${target_user}"
+  target_home="$(getent passwd "${target_user}" 2>/dev/null | cut -d: -f6)" || target_home=""
+  [ -n "${target_home}" ] || target_home="/home/${target_user}"
+
+  src="/root/.cache/huggingface"
+  dst="${target_home}/.cache/huggingface"
+
+  [ -d "${src}" ] || die "Nothing to reclaim: ${src} does not exist."
+
+  local sz
+  sz="$(du -sh "${src}" 2>/dev/null | cut -f1)" || sz="?"
+  log "Reclaiming ${sz} from ${src}"
+
+  mkdir -p "${target_home}/.cache"
+  chown "${target_user}:${target_group}" "${target_home}/.cache"
+
+  if [ -d "${dst}" ]; then
+    # Never clobber an existing cache -- merge, letting the user's copy win.
+    warn "${dst} already exists; merging without overwriting what is there."
+    cp -an "${src}/." "${dst}/" 2>/dev/null || true
+    rm -rf "${src}"
+  else
+    mv "${src}" "${dst}"
+  fi
+
+  chown -R "${target_user}:${target_group}" "${dst}"
+  ok "moved to ${dst}, owned by ${target_user}:${target_group}"
+
+  echo
+  log "Done. As yourself, verify the snapshot is visible:"
+  echo "      ls ${dst}/hub"
+  echo "      bash scripts/run_all.sh"
+}
+
 # ---------------------------------------------------------------------------
 case "${STAGE}" in
   # `|| exit` keeps the ERR trap quiet: preflight returning 1 means "something
@@ -505,6 +567,7 @@ case "${STAGE}" in
   preflight)  preflight || exit $? ;;
   cuda)       setup_cuda ;;
   fix-perms)  fix_perms ;;
+  reclaim)    reclaim ;;
   python)    refuse_sudo; setup_python ;;
   llamacpp)  refuse_sudo; setup_llamacpp ;;
   prebuilt)  refuse_sudo; setup_prebuilt ;;
@@ -514,7 +577,7 @@ case "${STAGE}" in
     setup_python
     setup_llamacpp || warn "llama.cpp build failed -- try: bash scripts/setup_server.sh prebuilt"
     ;;
-  *) echo "Unknown stage: ${STAGE} (use: preflight | fix-perms | cuda | python | llamacpp | prebuilt | all)"; exit 1 ;;
+  *) echo "Unknown stage: ${STAGE} (use: preflight | fix-perms | reclaim | cuda | python | llamacpp | prebuilt | all)"; exit 1 ;;
 esac
 
 log "Setup complete"
