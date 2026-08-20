@@ -123,27 +123,68 @@ def require_gemma4_support():
                 "  pip install -r requirements.txt"
             )
 
-    # Version is new enough, so "too old" would be the wrong answer. Report what
-    # actually failed. A missing peer dependency shows up here too, because
-    # transformers resolves model classes lazily.
-    missing = getattr(model_class_error, "name", None)
+    # Version is new enough, so "too old" would be the wrong answer.
+    #
+    # transformers re-raises peer-dependency failures as its own
+    # ModuleNotFoundError("Could not import module 'X'"), which drops exc.name
+    # and names the class it was trying to build rather than the module that
+    # was actually absent. Walk the __cause__/__context__ chain to the original
+    # exception, and probe the vision stack directly, so the answer is concrete.
+    def _root_cause(exc):
+        seen = set()
+        cur = exc
+        while cur is not None and id(cur) not in seen:
+            seen.add(id(cur))
+            nxt = cur.__cause__ or cur.__context__
+            if nxt is None:
+                break
+            cur = nxt
+        return cur
+
+    root = _root_cause(model_class_error)
+    missing = getattr(root, "name", None)
+    if not missing:
+        text = str(root)
+        for candidate in ("torchvision", "torchaudio", "PIL", "pillow",
+                          "timm", "av", "sentencepiece", "protobuf"):
+            if candidate in text:
+                missing = candidate
+                break
+
+    # Direct probe: report what is actually importable right now.
+    probe_lines = []
+    for mod in ("torch", "torchvision", "PIL", "accelerate"):
+        try:
+            imported = __import__(mod)
+            probe_lines.append(
+                "    " + mod.ljust(14) + " "
+                + str(getattr(imported, "__version__", "installed"))
+            )
+        except Exception as exc:  # noqa: BLE001 - reporting, not handling
+            probe_lines.append(
+                "    " + mod.ljust(14) + " MISSING (" + type(exc).__name__ + ")"
+            )
+
     hint = ""
     if missing and "torchvision" in str(missing):
         hint = (
-            "\nInstall it from the same index as torch:\n"
+            "\ntorchvision is the one to install, matching your torch build:\n"
             "  source .venv/bin/activate\n"
             "  pip install torchvision --index-url "
             "https://download.pytorch.org/whl/cu128\n"
         )
+
     sys.exit(
         "transformers " + version + " is new enough for Gemma 4 (>= "
         + MIN_TRANSFORMERS + "), but Gemma4ForConditionalGeneration\n"
         "could not be imported.\n\n"
-        "  error:          " + type(model_class_error).__name__ + ": "
-        + str(model_class_error) + "\n"
-        "  missing module: " + str(missing or "unclear") + "\n\n"
-        "transformers resolves model classes lazily, so a missing peer dependency\n"
-        "surfaces here rather than at import time.\n" + hint +
+        "  transformers said: " + str(model_class_error) + "\n"
+        "  root cause:        " + type(root).__name__ + ": " + str(root) + "\n"
+        "  missing module:    " + str(missing or "see root cause above") + "\n\n"
+        "  currently importable:\n" + "\n".join(probe_lines) + "\n\n"
+        "transformers resolves model classes lazily and rewrites the underlying\n"
+        "ImportError, which is why its own message names the class rather than\n"
+        "the missing module.\n" + hint +
         "\nReinstall the full set:\n"
         "  source .venv/bin/activate && pip install -r requirements.txt"
     )
