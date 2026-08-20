@@ -161,9 +161,10 @@ bash scripts/setup_server.sh llamacpp
 > There are no prebuilt **Linux CUDA** llama.cpp binaries published upstream — only CPU,
 > Vulkan, and SYCL — so GPU llama.cpp genuinely requires compiling from source.
 
-> **transformers version matters.** Gemma 4 needs a build that knows the `gemma4`
-> architecture and exposes `Gemma4ForConditionalGeneration`. If loading fails with an
-> unknown-model-type error, `pip install -U transformers` and retry.
+> **transformers must be >= 5.5.0.** Gemma 4 (`model_type: gemma4`, `Gemma4Processor`,
+> `Gemma4ForConditionalGeneration`) landed in transformers 5.5.0. Anything older fails
+> with `Could not import module 'Gemma4Processor'`. The scripts check this on startup
+> and tell you, rather than failing deep inside `AutoProcessor`.
 
 ---
 
@@ -289,8 +290,16 @@ can commit a finished report.
 **CUDA OOM on load.** bf16 needs both cards. Either use `--gpus 0,1`, or drop to
 `--load-4bit` on one. If someone else's job grew, raise `--reserve-mib`.
 
-**`KeyError: 'gemma4'` or unknown model type.** transformers is too old:
-`pip install -U transformers`.
+**`Could not import module 'Gemma4Processor'`** (or `KeyError: 'gemma4'`). transformers
+is older than 5.5.0, the release that added Gemma 4:
+
+```bash
+source .venv/bin/activate && pip install -U "transformers>=5.5.0"
+```
+
+**Anything resolving under `/root/`** — e.g. `need llama-server at /root/llama.cpp/...`.
+The script was run with `sudo`, so `HOME` became `/root`. Re-run as yourself; the
+scripts now refuse sudo outright.
 
 **`cmake: command not found`.** Fixed automatically — `setup_server.sh` installs cmake
 and ninja from PyPI. If they land somewhere off `PATH`:

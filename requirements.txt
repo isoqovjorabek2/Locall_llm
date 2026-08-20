@@ -1,6 +1,9 @@
 # Core inference (GPU track)
 torch>=2.6.0
-transformers>=4.57.0
+# Gemma 4 (model_type "gemma4", Gemma4Processor / Gemma4ForConditionalGeneration)
+# landed in transformers 5.5.0. Anything older resolves the processor class to
+# nothing and dies with "Could not import module 'Gemma4Processor'".
+transformers>=5.5.0
 accelerate>=1.2.0
 safetensors>=0.4.5
 sentencepiece>=0.2.0

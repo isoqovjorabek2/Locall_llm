@@ -66,13 +66,13 @@ def make_hf_generator(args):
     max_memory = build_max_memory(gpu_indices, args.reserve_mib)
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in gpu_indices)
 
+    from bench.common import require_gemma4_support
+
+    require_gemma4_support()
+
     import torch
     from transformers import AutoProcessor
-
-    try:
-        from transformers import Gemma4ForConditionalGeneration as ModelCls
-    except ImportError:
-        from transformers import AutoModelForCausalLM as ModelCls
+    from transformers import Gemma4ForConditionalGeneration as ModelCls
 
     load_kwargs = dict(device_map="auto", max_memory=max_memory, attn_implementation="sdpa")
     precision = "bf16"

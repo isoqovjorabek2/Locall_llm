@@ -21,14 +21,55 @@ SERVER_PORT="${SERVER_PORT:-8080}"
 # GPU 1 was the emptier A40 in the nvidia-smi snapshot; override if that changed.
 GPU_FOR_LLAMACPP="${GPU_FOR_LLAMACPP:-1}"
 
-log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
+die()  { printf '\n\033[1;31m[stop] %s\033[0m\n' "$*"; exit 1; }
 
-if [ -d "${REPO_ROOT}/.venv" ]; then
-  # shellcheck disable=SC1091
-  source "${REPO_ROOT}/.venv/bin/activate"
+# Under sudo, HOME becomes /root, so LLAMA_DIR resolves to /root/llama.cpp and
+# the whole run looks for binaries and caches in the wrong place.
+if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
+  die "Do not run the benchmarks with sudo.
+
+  HOME becomes /root, so llama.cpp is looked up at /root/llama.cpp and Hugging
+  Face reads from /root/.cache -- neither is where setup put things.
+
+  Run as yourself:
+      bash scripts/run_all.sh"
 fi
 
+if [ ! -f "${REPO_ROOT}/.venv/bin/activate" ]; then
+  die "No venv at ${REPO_ROOT}/.venv
+      Run first: bash scripts/setup_server.sh"
+fi
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/.venv/bin/activate"
+
+# Fail here, with the fix, rather than deep inside AutoProcessor.
+python - <<'PY' || exit 1
+import sys
+sys.path.insert(0, ".")
+from bench.common import require_gemma4_support
+print("[info] transformers", require_gemma4_support())
+PY
+
 GGUF="$(find "${MODELS_DIR}" -name '*.gguf' 2>/dev/null | head -1 || true)"
+
+# The HF weights live in the shared cache, so check for a real local snapshot
+# rather than assuming; an empty cache means run_all would do nothing useful.
+HF_CACHE="${HF_HOME:-${HOME}/.cache/huggingface}"
+if ! find "${HF_CACHE}" -type d -name '*gemma-4-26B-A4B-it*' 2>/dev/null | grep -q .; then
+  warn "No local snapshot of google/gemma-4-26B-A4B-it under ${HF_CACHE}."
+  warn "The GPU track and the bf16 Uzbek eval will download ~52 GB on first use,"
+  warn "or fail if the disk is short. Pre-fetch with: bash scripts/download_models.sh"
+fi
+if [ -z "${GGUF}" ]; then
+  warn "No .gguf under ${MODELS_DIR} -- the CPU track and the Q4 eval will be skipped."
+  warn "Fetch it with: bash scripts/download_models.sh gguf"
+fi
+if [ -z "${GGUF}" ] && ! find "${HF_CACHE}" -type d -name '*gemma-4-26B-A4B-it*' 2>/dev/null | grep -q .; then
+  die "Neither weight set is present -- there is nothing to benchmark.
+      Run first: bash scripts/download_models.sh"
+fi
 
 log "Current GPU state (check you are not about to evict someone's job)"
 nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv || true

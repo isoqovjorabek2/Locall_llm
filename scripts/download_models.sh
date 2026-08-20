@@ -18,6 +18,16 @@ GGUF_QUANT="${GGUF_QUANT:-Q4_K_M}"
 STAGE="${1:-all}"
 
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+die() { printf '\n\033[1;31m[stop] %s\033[0m\n' "$*"; exit 1; }
+
+# Under sudo these ~67 GB land in /root/.cache, where nothing else looks.
+if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
+  die "Do not download with sudo -- ~67 GB would go to /root/.cache instead of
+  your home directory, and the benchmarks would not find it.
+
+  Run as yourself:
+      bash scripts/download_models.sh"
+fi
 
 if [ -d "${REPO_ROOT}/.venv" ]; then
   # shellcheck disable=SC1091

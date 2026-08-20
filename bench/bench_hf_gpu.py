@@ -28,6 +28,7 @@ from bench.common import (  # noqa: E402
     gpu_inventory,
     host_info,
     make_record,
+    require_gemma4_support,
     write_meta,
     write_records,
 )
@@ -84,16 +85,11 @@ def main():
     max_memory = build_max_memory(gpu_indices, args.reserve_mib)
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in gpu_indices)
 
+    require_gemma4_support()
+
     import torch  # noqa: E402  (import after CUDA_VISIBLE_DEVICES is set)
     from transformers import AutoProcessor, TextIteratorStreamer
-
-    try:
-        from transformers import Gemma4ForConditionalGeneration as ModelCls
-    except ImportError:
-        # Older/newer transformers may only expose the auto class.
-        from transformers import AutoModelForCausalLM as ModelCls
-        print("[warn] Gemma4ForConditionalGeneration not found; using AutoModelForCausalLM. "
-              "If this fails, upgrade transformers.", file=sys.stderr)
+    from transformers import Gemma4ForConditionalGeneration as ModelCls
 
     if not torch.cuda.is_available():
         sys.exit("CUDA is not available -- this script is the GPU track.")

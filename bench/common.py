@@ -22,6 +22,54 @@ RESULTS_DIR = REPO_ROOT / "results" / "raw"
 
 MODEL_ID = "google/gemma-4-26B-A4B-it"
 
+# Gemma 4 support (model_type "gemma4") landed in transformers 5.5.0.
+MIN_TRANSFORMERS = "5.5.0"
+
+
+def require_gemma4_support():
+    """Fail fast, and legibly, if transformers is too old for Gemma 4.
+
+    Without this the failure surfaces deep inside AutoProcessor as
+    "Could not import module 'Gemma4Processor'", which does not point at the
+    actual problem (an outdated transformers).
+    """
+    import sys
+
+    try:
+        import transformers
+    except ImportError as exc:
+        sys.exit(
+            "transformers could not be imported: " + str(exc) + "\n"
+            "  source .venv/bin/activate && pip install -r requirements.txt"
+        )
+    except Exception as exc:  # installed but broken (bad deps, partial install)
+        sys.exit(
+            "transformers is installed but fails to import:\n"
+            "  " + type(exc).__name__ + ": " + str(exc) + "\n\n"
+            "Reinstall it inside the venv:\n"
+            "  source .venv/bin/activate && pip install -r requirements.txt"
+        )
+
+    version = getattr(transformers, "__version__", "unknown")
+    try:
+        from transformers import Gemma4ForConditionalGeneration  # noqa: F401
+        return version
+    except ImportError:
+        pass
+
+    sys.exit(
+        "This transformers is too old for Gemma 4.\n\n"
+        "  installed: " + version + "\n"
+        "  required:  >= " + MIN_TRANSFORMERS + "  (adds model_type 'gemma4',\n"
+        "             Gemma4Processor and Gemma4ForConditionalGeneration)\n\n"
+        "Fix:\n"
+        "  source .venv/bin/activate\n"
+        "  pip install -U 'transformers>=" + MIN_TRANSFORMERS + "'\n\n"
+        "Note transformers 5.x is a major release; reinstall from requirements.txt\n"
+        "if other packages complain:\n"
+        "  pip install -r requirements.txt"
+    )
+
 # ---------------------------------------------------------------------------
 # Benchmark prompt set
 # ---------------------------------------------------------------------------
