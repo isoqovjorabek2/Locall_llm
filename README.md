@@ -104,6 +104,10 @@ for `sm_86` only (A40 is Ampere), which keeps the compile to minutes rather than
 Run stages separately if you prefer: `bash scripts/setup_server.sh python` /
 `... llamacpp` / `... prebuilt`, and `bash scripts/download_models.sh hf` / `... gguf`.
 
+> **Do not run setup with `sudo`.** Under sudo the venv is created root-owned and
+> Hugging Face caches ~52 GB of weights into `/root/.cache` instead of your home
+> directory. The scripts refuse to run that way. Only the CUDA stage below needs root.
+
 ### Two things pip cannot fix
 
 **A C++ compiler.** If preflight reports no `g++`/`clang++`, check for a module system
@@ -113,9 +117,25 @@ the CPU track and the Q4 Uzbek eval still run.
 
 **The CUDA toolkit.** `nvidia-smi` reporting "CUDA 13.2" is the **driver's** runtime
 version — it does *not* mean `nvcc` is installed, and `GGML_CUDA=ON` needs the real
-toolkit. Try `module avail cuda && module load cuda`. Without it the build falls back to
-CPU-only, which costs you Track A's GPU half; Track A's CPU half and all of Track B
-(transformers, which uses pip-installed CUDA via torch and needs no `nvcc`) still work.
+toolkit. **Only llama.cpp needs this**; transformers gets CUDA from its pip wheels, so
+Track B and both Uzbek evals work without `nvcc` at all. Missing it costs you only
+Track A's GPU half.
+
+To get it, in order of preference:
+
+```bash
+module avail cuda && module load cuda     # if the box has modules, use this
+sudo bash scripts/setup_server.sh cuda    # otherwise, needs root
+```
+
+The `cuda` stage installs `cuda-toolkit-13-2` to match the 595.x driver. It installs the
+**toolkit only** — deliberately *not* the `cuda` metapackage, which would pull a new
+driver and disrupt the other users' jobs on these cards. Afterwards, as yourself:
+
+```bash
+export CUDA_HOME=/usr/local/cuda-13.2 && export PATH="$CUDA_HOME/bin:$PATH"
+bash scripts/setup_server.sh llamacpp
+```
 
 > There are no prebuilt **Linux CUDA** llama.cpp binaries published upstream — only CPU,
 > Vulkan, and SYCL — so GPU llama.cpp genuinely requires compiling from source.

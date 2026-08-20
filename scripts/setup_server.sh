@@ -21,6 +21,25 @@ log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ok\033[0m   %s\n' "$*"; }
 bad()  { printf '\033[1;31m  MISSING\033[0m %s\n' "$*"; }
+die()  { printf '\n\033[1;31m[stop] %s\033[0m\n' "$*"; exit 1; }
+
+# Do NOT create the venv or download weights as root. Under sudo the venv ends up
+# root-owned (later non-sudo pip installs fail) and ~52 GB of Hugging Face weights
+# land in /root/.cache instead of your home. Only the `cuda` stage needs sudo.
+refuse_sudo() {
+  if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" -eq 0 ]; then
+    die "Do not run the '${STAGE}' stage with sudo.
+
+  The venv would be created root-owned and Hugging Face would cache ~52 GB of
+  weights into /root/.cache instead of your home directory.
+
+  Run it as yourself:
+      bash scripts/setup_server.sh ${STAGE}
+
+  Only the CUDA toolkit install needs root:
+      sudo bash scripts/setup_server.sh cuda"
+  fi
+}
 
 # Use the venv whenever it exists, so `llamacpp` works as a standalone stage.
 activate_venv_if_present() {
@@ -120,8 +139,12 @@ preflight() {
   else
     bad "nvcc  -- CUDA toolkit not found"
     warn "nvidia-smi showing 'CUDA 13.2' is the DRIVER version, not a toolkit."
-    warn "Without nvcc, llama.cpp will be built CPU-only (Track A GPU unavailable)."
-    warn "Look for a module first:  module avail cuda   &&   module load cuda"
+    warn "Only llama.cpp's CUDA backend needs this. transformers gets CUDA from"
+    warn "its pip wheels, so Track B and both Uzbek evals work without it."
+    warn "To get Track A's GPU half, in order of preference:"
+    warn "  1. module avail cuda && module load cuda"
+    warn "  2. sudo bash scripts/setup_server.sh cuda    (installs toolkit only,"
+    warn "     never the driver, so other users' jobs are untouched)"
   fi
 
   if command -v nvidia-smi >/dev/null 2>&1; then
@@ -275,17 +298,65 @@ setup_prebuilt() {
 }
 
 # ---------------------------------------------------------------------------
+# Install the CUDA toolkit (needs root). Only llama.cpp's CUDA backend requires
+# this -- transformers gets CUDA from its pip wheels and never needs nvcc.
+setup_cuda() {
+  if [ "$(id -u)" -ne 0 ]; then
+    die "This stage installs system packages and needs root:
+      sudo bash scripts/setup_server.sh cuda"
+  fi
+
+  local version="${CUDA_VERSION:-13-2}"
+  local dotted="${version//-/.}"
+
+  log "Installing cuda-toolkit-${version} from NVIDIA's Ubuntu 24.04 repository"
+  warn "Installing the TOOLKIT ONLY (cuda-toolkit-${version})."
+  warn "Deliberately NOT the 'cuda' metapackage -- that one pulls a new DRIVER,"
+  warn "which would disrupt the other users' jobs running on these A40s."
+  echo
+
+  if command -v lsb_release >/dev/null 2>&1 && [ "$(lsb_release -rs)" != "24.04" ]; then
+    warn "Expected Ubuntu 24.04, found $(lsb_release -rs). Check the repo URL suits it."
+  fi
+
+  local tmp keyring
+  tmp="$(mktemp -d)"
+  keyring="cuda-keyring_1.1-1_all.deb"
+  curl -fL -o "${tmp}/${keyring}" \
+    "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/${keyring}"
+  dpkg -i "${tmp}/${keyring}"
+  rm -rf "${tmp}"
+
+  apt-get update
+  apt-get install -y "cuda-toolkit-${version}"
+
+  if [ -x "/usr/local/cuda-${dotted}/bin/nvcc" ]; then
+    log "Installed $(/usr/local/cuda-${dotted}/bin/nvcc --version | grep -o 'release [0-9.]*')"
+    echo
+    echo "Now, as yourself (NOT root):"
+    echo "  export CUDA_HOME=/usr/local/cuda-${dotted}"
+    echo "  export PATH=\"\$CUDA_HOME/bin:\$PATH\""
+    echo "  bash scripts/setup_server.sh llamacpp"
+  else
+    warn "nvcc not found at /usr/local/cuda-${dotted}/bin/nvcc"
+    warn "Check: ls /usr/local/ | grep cuda"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 case "${STAGE}" in
   preflight) preflight ;;
-  python)    setup_python ;;
-  llamacpp)  setup_llamacpp ;;
-  prebuilt)  setup_prebuilt ;;
+  cuda)      setup_cuda ;;
+  python)    refuse_sudo; setup_python ;;
+  llamacpp)  refuse_sudo; setup_llamacpp ;;
+  prebuilt)  refuse_sudo; setup_prebuilt ;;
   all)
+    refuse_sudo
     preflight || warn "Continuing despite preflight warnings"
     setup_python
     setup_llamacpp || warn "llama.cpp build failed -- try: bash scripts/setup_server.sh prebuilt"
     ;;
-  *) echo "Unknown stage: ${STAGE} (use: preflight | python | llamacpp | prebuilt | all)"; exit 1 ;;
+  *) echo "Unknown stage: ${STAGE} (use: preflight | cuda | python | llamacpp | prebuilt | all)"; exit 1 ;;
 esac
 
 log "Setup complete"
