@@ -4,13 +4,15 @@
 #   bash scripts/setup_server.sh             # everything
 #   bash scripts/setup_server.sh preflight   # just check what is missing
 #   bash scripts/setup_server.sh python      # venv + pip deps
+#   bash scripts/setup_server.sh torch       # (re)install matched torch+torchvision
+#   bash scripts/setup_server.sh verify      # check torch/torchvision/CUDA agree
 #   bash scripts/setup_server.sh llamacpp    # build llama.cpp (CUDA if possible)
 #   bash scripts/setup_server.sh prebuilt    # skip building: fetch CPU-only binaries
 #   sudo bash scripts/setup_server.sh cuda       # install CUDA toolkit (needs root)
 #   sudo bash scripts/setup_server.sh fix-perms  # undo an earlier sudo run
 #   sudo bash scripts/setup_server.sh reclaim    # move root-downloaded weights to you
 #
-# Run every stage as YOURSELF. Only `cuda` and `fix-perms` take sudo -- the others
+# Run every stage as YOURSELF. Only `cuda`, `fix-perms` and `reclaim` take sudo -- others
 # refuse to run as root, because a root-created venv breaks later pip installs and
 # sends ~52 GB of weights to /root/.cache. cmake and ninja come from PyPI (those
 # wheels ship real binaries) rather than apt, so a locked-down server is fine.
@@ -270,6 +272,52 @@ Install the pair together from one index:", file=sys.stderr)
     print("      --index-url https://download.pytorch.org/whl/cu128", file=sys.stderr)
     sys.exit(1)
 PY
+}
+
+# Install or repair the torch/torchvision pair. They must be resolved together
+# from one index: torchvision ships a compiled extension linked against one exact
+# torch build, and a mismatch gives "operator torchvision::nms does not exist".
+setup_torch() {
+  local index="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
+
+  if [ ! -x "${VENV}/bin/python" ]; then
+    die "No venv at ${VENV}
+      Run first: bash scripts/setup_server.sh python"
+  fi
+  # shellcheck disable=SC1091
+  source "${VENV}/bin/activate"
+
+  log "Reinstalling torch + torchvision together from ${index}"
+  warn "Both, together, from one index -- installing torchvision alone cannot"
+  warn "fix a mismatch. This downloads ~2.5 GB."
+  "${VENV}/bin/python" -m pip install --force-reinstall --no-cache-dir \
+    torch torchvision --index-url "${index}"
+
+  verify_torch
+}
+
+# Importing torchvision is not a sufficient check: the import can succeed while
+# operator registration against this torch still fails. Touch an operator.
+verify_torch() {
+  log "Verifying the pair"
+  "${VENV}/bin/python" - <<'PY'
+import sys
+import torch
+print("  torch:      ", torch.__version__)
+print("  cuda:       ", torch.cuda.is_available(), "-", torch.cuda.device_count(), "device(s)")
+try:
+    import torchvision
+    print("  torchvision:", torchvision.__version__)
+    torch.ops.torchvision.nms  # noqa: B018 - probing operator registration
+    print("  ops:         registered OK")
+except Exception as exc:
+    print("\n  BROKEN: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+    print("  torch and torchvision still do not match.", file=sys.stderr)
+    print("  Try a different index, e.g. TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126",
+          file=sys.stderr)
+    sys.exit(1)
+PY
+  ok "torch and torchvision agree"
 }
 
 # ---------------------------------------------------------------------------
@@ -589,6 +637,8 @@ case "${STAGE}" in
   fix-perms)  fix_perms ;;
   reclaim)    reclaim ;;
   python)    refuse_sudo; setup_python ;;
+  torch)     refuse_sudo; setup_torch ;;
+  verify)    refuse_sudo; verify_torch ;;
   llamacpp)  refuse_sudo; setup_llamacpp ;;
   prebuilt)  refuse_sudo; setup_prebuilt ;;
   all)
@@ -597,7 +647,7 @@ case "${STAGE}" in
     setup_python
     setup_llamacpp || warn "llama.cpp build failed -- try: bash scripts/setup_server.sh prebuilt"
     ;;
-  *) echo "Unknown stage: ${STAGE} (use: preflight | fix-perms | reclaim | cuda | python | llamacpp | prebuilt | all)"; exit 1 ;;
+  *) echo "Unknown stage: ${STAGE} (use: preflight | fix-perms | reclaim | cuda | python | torch | verify | llamacpp | prebuilt | all)"; exit 1 ;;
 esac
 
 log "Setup complete"
