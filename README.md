@@ -71,6 +71,35 @@ Read Track A to answer *"how much faster is the GPU?"*, and Track B to answer
 
 ---
 
+## Which shell do I run this in?
+
+**Everything runs as yourself, with the venv activated. No sudo.**
+
+```bash
+cd ~/Locall_llm && source .venv/bin/activate
+```
+
+Your prompt should then start with `(.venv)`. That is the correct state for every
+command in this README, with exactly three exceptions:
+
+| Command | venv? | sudo? |
+|---|---|---|
+| `sudo bash scripts/setup_server.sh cuda` | no | **yes** |
+| `sudo bash scripts/setup_server.sh fix-perms` | no | **yes** |
+| `sudo bash scripts/setup_server.sh reclaim` | no | **yes** |
+| everything else | **yes** | no |
+
+The `bash scripts/*.sh` wrappers activate the venv themselves, so they work either
+way. Bare `python ...` commands do not — those need `(.venv)` in your prompt, or
+they hit the system python and fail with `externally-managed-environment` or
+`ModuleNotFoundError`.
+
+If `(.venv)` shows in your prompt but things still resolve to the system python,
+the venv directory was deleted while activated. Run `deactivate`, then
+`bash scripts/setup_server.sh python` to rebuild it.
+
+---
+
 ## Setup
 
 ```bash
