@@ -1,0 +1,297 @@
+{
+  "version": "1.0",
+  "notes": [
+    "Uzbek Latin uses oʻ and gʻ with U+02BB MODIFIER LETTER TURNED COMMA, and ʼ (U+02BC) as tutuq belgisi.",
+    "Models very often emit ASCII o' / g' instead. The scorer accepts both but reports which was used.",
+    "Uzbek Latin has NO ç, ş, ğ, ı, ö, ü, â. Any of those means the model drifted into Turkish/Azeri.",
+    "References were authored for this suite; treat chrF as a relative signal between runs, not an absolute WMT score."
+  ],
+
+  "uz_reference_corpus": [
+    "Oʻzbekiston Markaziy Osiyoning qoq markazida joylashgan boʻlib, uning hududi asosan tekislik va choʻllardan iborat. Mamlakatning sharqiy qismida Tyanshan va Pomir-Oloy togʻ tizmalari koʻtarilib turadi. Amudaryo va Sirdaryo mamlakat qishloq xoʻjaligining asosiy suv manbalari hisoblanadi.",
+    "Samarqand, Buxoro va Xiva shaharlari Buyuk ipak yoʻli chorrahasida joylashgani uchun asrlar davomida savdo va ilm-fan markazi boʻlib kelgan. Bu shaharlardagi meʼmorchilik yodgorliklari bugungi kunda YUNESKO umumjahon merosi roʻyxatiga kiritilgan.",
+    "Kutubxona ertalab soat toʻqqizda ochiladi va kechqurun soat oltida yopiladi. Talabalar u yerda darslarga tayyorgarlik koʻrishadi, kitob oʻqishadi va bir-birlari bilan fikr almashishadi.",
+    "Mening ukam Toshkentdagi universitetda tibbiyot boʻyicha oʻqiyapti. U har kuni ertalab avtobusda darsga boradi va kechqurun uyga qaytadi. Dam olish kunlari esa kutubxonaga borib, imtihonlarga tayyorlanadi.",
+    "Bahor kelishi bilan bogʻlardagi olma va oʻrik daraxtlari gullay boshlaydi. Dehqonlar yerni haydab, urugʻ sepishga kirishadilar. Yozda esa paxta va bugʻdoy dalalarida ish qizigʻidan qizib ketadi.",
+    "Iqtisodiyotning barqaror oʻsishi uchun kichik biznes va xususiy tadbirkorlikni qoʻllab-quvvatlash zarur. Soʻnggi yillarda mamlakatda islohotlar olib borilmoqda va xorijiy sarmoyalar hajmi ortib bormoqda.",
+    "Ona tilini asrab-avaylash har bir xalqning muqaddas burchidir. Til yoʻqolsa, u bilan birga xalqning tarixi, urf-odatlari va dunyoqarashi ham unutilib ketadi.",
+    "Bolalar hovlida futbol oʻynashyapti. Ularning kulgisi va shovqini butun mahallaga eshitilib turibdi. Onalar deraza oldida turib, farzandlarini kuzatishmoqda.",
+    "Zamonaviy kompyuterlarda operativ xotira dasturlarning tez ishlashi uchun xizmat qiladi. Protsessor maʼlumotlarni qayta ishlaydi, qattiq disk esa fayllarni uzoq muddat saqlaydi. Internet tarmogʻi orqali foydalanuvchilar butun dunyo boʻylab axborot almashadilar.",
+    "Sogʻlom turmush tarzini saqlash uchun kuniga kamida sakkiz soat uxlash, muntazam jismoniy mashqlar bajarish va toʻgʻri ovqatlanish tavsiya etiladi. Shifokorlar mevalar va sabzavotlarni koʻproq isteʼmol qilishni maslahat beradilar. Kasallik alomatlari paydo boʻlsa, oʻz-oʻzini davolash oʻrniga mutaxassisga murojaat qilish kerak.",
+    "Taʼlim tizimida oʻqituvchining oʻrni beqiyos katta. U nafaqat bilim beradi, balki oʻquvchilarni mustaqil fikrlashga, izlanishga va mehnat qilishga oʻrgatadi. Maktab bitiruvchilari oliy oʻquv yurtlariga kirish uchun imtihon topshiradilar.",
+    "Oʻzbek milliy taomlari orasida palov alohida oʻrin tutadi. Uni tayyorlash uchun guruch, goʻsht, sabzi, piyoz va yogʻ kerak boʻladi. Tandirda yopilgan non, somsa va manti ham dasturxonning koʻrki hisoblanadi. Mehmon kelganda oilalar eng yaxshi taomlarni tortadilar.",
+    "Sport insonning irodasini mustahkamlaydi va sogʻligʻini yaxshilaydi. Yoshlar orasida futbol, kurash, boks va tennis keng tarqalgan. Xalqaro musobaqalarda gʻolib chiqqan sportchilar mamlakat sharafini himoya qiladilar.",
+    "Tadbirkorlar yangi korxona ochish uchun avval bozorni oʻrganadilar, keyin biznes-reja tuzadilar. Bankdan kredit olish, soliq toʻlash va ishchilar yollash bilan bogʻliq masalalar qonun asosida hal qilinadi. Raqobat sharoitida mahsulot sifati eng muhim omil boʻlib qoladi.",
+    "Qizilqum choʻlida yashovchi hayvonlar issiq iqlimga moslashgan. Toshbaqalar, kaltakesaklar va turli qushlar bu yerda uchraydi. Bahorda choʻl lolalar bilan qoplanadi, yozda esa harorat qirq darajadan oshib ketadi.",
+    "Ertalab shahar koʻchalarida odamlar ishga shoshiladi. Metro bekatlari gavjum boʻladi, avtobuslar va yoʻlovchi mashinalar navbat bilan yurishadi. Kechga borib tirbandlik kamayadi va shahar tinchiydi.",
+    "Kutubxonachi javonlardagi kitoblarni tartib bilan joylashtiradi. Oʻquvchilar kerakli asarni katalogdan topib, oʻqish zaliga olib kirishadi. Ayrim noyob qoʻlyozmalar alohida xonada maxsus sharoitda saqlanadi.",
+    "Yozuvchining yangi romani oʻtgan asr voqealari haqida hikoya qiladi. Asar qahramonlari ogʻir sinovlardan oʻtib, oʻz orzulariga erishadilar. Kitobxonlar bu asarni katta qiziqish bilan kutib oldilar va tanqidchilar ijobiy baho berdilar.",
+    "Qishda havo sovib, daraxtlar bargini toʻkadi. Qor yogʻsa, bolalar qorboboni yasashadi va chanada uchishadi. Uylarda isitish tizimi ishlaydi, odamlar issiq choy ichib, mehmon kutishadi."
+  ],
+
+  "items": [
+    {
+      "id": "tr_en_uz_01",
+      "category": "translation_en_uz",
+      "prompt": "Translate the following sentence into Uzbek (Latin script). Output only the translation, nothing else.\n\n\"The library opens at nine in the morning and closes at six in the evening.\"",
+      "reference": "Kutubxona ertalab soat toʻqqizda ochiladi va kechqurun soat oltida yopiladi.",
+      "expect_script": "latin",
+      "expect_lang": "uz"
+    },
+    {
+      "id": "tr_en_uz_02",
+      "category": "translation_en_uz",
+      "prompt": "Translate the following sentence into Uzbek (Latin script). Output only the translation, nothing else.\n\n\"My younger brother is studying medicine at a university in Tashkent.\"",
+      "reference": "Mening ukam Toshkentdagi universitetda tibbiyot boʻyicha oʻqiyapti.",
+      "expect_script": "latin",
+      "expect_lang": "uz"
+    },
+    {
+      "id": "tr_en_uz_03",
+      "category": "translation_en_uz",
+      "prompt": "Translate the following sentence into Uzbek (Latin script). Output only the translation, nothing else.\n\n\"If it rains tomorrow, we will not go to the mountains.\"",
+      "reference": "Agar ertaga yomgʻir yogʻsa, biz togʻga bormaymiz.",
+      "expect_script": "latin",
+      "expect_lang": "uz"
+    },
+    {
+      "id": "tr_en_uz_04",
+      "category": "translation_en_uz",
+      "prompt": "Translate the following sentence into Uzbek (Latin script). Output only the translation, nothing else.\n\n\"The country's economy has grown rapidly over the past ten years.\"",
+      "reference": "Mamlakat iqtisodiyoti soʻnggi oʻn yil ichida jadal oʻsdi.",
+      "expect_script": "latin",
+      "expect_lang": "uz"
+    },
+    {
+      "id": "tr_en_uz_05",
+      "category": "translation_en_uz",
+      "prompt": "Translate the following text into Uzbek (Latin script). Output only the translation, nothing else.\n\n\"Doctors recommend drinking enough water during hot summer days, especially for children and elderly people.\"",
+      "reference": "Shifokorlar issiq yoz kunlarida yetarlicha suv ichishni tavsiya qiladilar, ayniqsa bolalar va keksalar uchun.",
+      "expect_script": "latin",
+      "expect_lang": "uz"
+    },
+    {
+      "id": "tr_uz_en_01",
+      "category": "translation_uz_en",
+      "prompt": "Translate the following Uzbek sentence into English. Output only the translation, nothing else.\n\n\"Bugun havo juda issiq, shuning uchun biz uyda qoldik.\"",
+      "reference": "The weather is very hot today, so we stayed at home.",
+      "expect_script": "latin",
+      "expect_lang": "en"
+    },
+    {
+      "id": "tr_uz_en_02",
+      "category": "translation_uz_en",
+      "prompt": "Translate the following Uzbek sentence into English. Output only the translation, nothing else.\n\n\"Otam har kuni ertalab bogʻda ishlaydi.\"",
+      "reference": "My father works in the garden every morning.",
+      "expect_script": "latin",
+      "expect_lang": "en"
+    },
+    {
+      "id": "tr_uz_en_03",
+      "category": "translation_uz_en",
+      "prompt": "Translate the following Uzbek sentence into English. Output only the translation, nothing else.\n\n\"Bu masalani hal qilish uchun koʻproq maʼlumot kerak.\"",
+      "reference": "More information is needed to solve this problem.",
+      "expect_script": "latin",
+      "expect_lang": "en"
+    },
+    {
+      "id": "tr_uz_en_04",
+      "category": "translation_uz_en",
+      "prompt": "Translate the following Uzbek text into English. Output only the translation, nothing else.\n\n\"Samarqand va Buxoro shaharlari Buyuk ipak yoʻli chorrahasida joylashgani uchun asrlar davomida savdo markazi boʻlib kelgan.\"",
+      "reference": "The cities of Samarkand and Bukhara have been centres of trade for centuries because they lie at the crossroads of the Great Silk Road.",
+      "expect_script": "latin",
+      "expect_lang": "en"
+    },
+    {
+      "id": "tr_uz_en_05_cyr",
+      "category": "translation_uz_en",
+      "prompt": "Translate the following Uzbek (Cyrillic script) sentence into English. Output only the translation, nothing else.\n\n\"Кутубхона эрталаб соат тўққизда очилади ва кечқурун соат олтида ёпилади.\"",
+      "reference": "The library opens at nine in the morning and closes at six in the evening.",
+      "expect_script": "latin",
+      "expect_lang": "en"
+    },
+
+    {
+      "id": "script_latin_01",
+      "category": "script_control",
+      "prompt": "Oʻzbek tilida (lotin alifbosida) javob bering. Toshkent shahri haqida uch-toʻrt gapdan iborat qisqacha maʼlumot yozing.",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 25
+    },
+    {
+      "id": "script_cyr_01",
+      "category": "script_control",
+      "prompt": "Ўзбек тилида, КИРИЛЛ алифбосида жавоб беринг. Баҳор фасли ҳақида уч-тўрт гап ёзинг.",
+      "reference": null,
+      "expect_script": "cyrillic",
+      "expect_lang": "uz",
+      "min_words": 20
+    },
+    {
+      "id": "translit_lat2cyr",
+      "category": "transliteration",
+      "prompt": "Quyidagi oʻzbekcha matnni kirill alifbosiga oʻgiring. Faqat natijani yozing.\n\n\"Mening ukam maktabda oʻqiydi va har kuni kitob oʻqishni yaxshi koʻradi.\"",
+      "reference": "Менинг укам мактабда ўқийди ва ҳар куни китоб ўқишни яхши кўради.",
+      "expect_script": "cyrillic",
+      "expect_lang": "uz"
+    },
+    {
+      "id": "translit_cyr2lat",
+      "category": "transliteration",
+      "prompt": "Қуйидаги матнни лотин алифбосига ўгиринг. Фақат натижани ёзинг.\n\n\"Ўзбекистон Марказий Осиёнинг қоқ марказида жойлашган.\"",
+      "reference": "Oʻzbekiston Markaziy Osiyoning qoq markazida joylashgan.",
+      "expect_script": "latin",
+      "expect_lang": "uz"
+    },
+
+    {
+      "id": "morph_cases",
+      "category": "morphology",
+      "prompt": "\"kitob\" soʻzini oʻzbek tilidagi olti kelishik boʻyicha turlang. Har bir kelishik nomini va soʻz shaklini yozing.",
+      "reference": "kitob, kitobning, kitobni, kitobga, kitobda, kitobdan",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["kitobning"], ["kitobni"], ["kitobga"], ["kitobda"], ["kitobdan"]]
+    },
+    {
+      "id": "morph_verb",
+      "category": "morphology",
+      "prompt": "\"yozmoq\" feʼlini hozirgi zamon davom feʼli shaklida barcha shaxs-son boʻyicha tuslang. Faqat roʻyxatni yozing.",
+      "reference": "yozyapman, yozyapsan, yozyapti, yozyapmiz, yozyapsiz, yozyaptilar",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["yozyapman", "yozayapman"], ["yozyapsan", "yozayapsan"], ["yozyapti", "yozayapti"], ["yozyapmiz", "yozayapmiz"]]
+    },
+    {
+      "id": "morph_plural_poss",
+      "category": "morphology",
+      "prompt": "Quyidagi soʻz birikmasini oʻzbek tiliga oʻgiring va faqat natijani yozing: \"in our friends' houses\"",
+      "reference": "doʻstlarimizning uylarida",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["doʻstlarimiz", "do'stlarimiz", "dostlarimiz"], ["uylarida", "uylarida"]]
+    },
+
+    {
+      "id": "instr_follow_01",
+      "category": "instruction_following",
+      "prompt": "Oʻzbek tilida javob bering. Quyidagi savolga aniq uchta band (bullet) bilan javob yozing: talaba imtihonga qanday tayyorlanishi kerak?",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 30
+    },
+    {
+      "id": "instr_follow_02",
+      "category": "instruction_following",
+      "prompt": "Faqat oʻzbek tilida javob bering, ingliz tilidan foydalanmang. Quyoshning yer uchun ahamiyatini bir abzatsda tushuntiring.",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 30
+    },
+    {
+      "id": "instr_follow_03_json",
+      "category": "instruction_following",
+      "prompt": "Return ONLY a JSON object with keys \"shahar\", \"aholi\", \"daryo\" describing Samarkand, where all VALUES are written in Uzbek (Latin script). No markdown fences.",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "expect_json": true
+    },
+
+    {
+      "id": "know_uz_01",
+      "category": "knowledge",
+      "prompt": "Oʻzbekiston poytaxti qaysi shahar va u qaysi daryo vodiysida joylashgan? Oʻzbek tilida qisqa javob bering.",
+      "reference": "Toshkent, Chirchiq daryosi vodiysida",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["Toshkent", "Тошкент"]]
+    },
+    {
+      "id": "know_uz_02",
+      "category": "knowledge",
+      "prompt": "Alisher Navoiy kim boʻlgan va u qaysi tilda ijod qilgan? Oʻzbek tilida ikki-uch gap bilan javob bering.",
+      "reference": "Alisher Navoiy - shoir va davlat arbobi, chigʻatoy (eski oʻzbek) tilida ijod qilgan.",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["Navoiy", "Навоий"], ["shoir", "shoir", "шоир"]]
+    },
+    {
+      "id": "know_uz_03",
+      "category": "knowledge",
+      "prompt": "Oʻzbekiston bilan chegaradosh boʻlgan barcha davlatlarni oʻzbek tilida sanab bering.",
+      "reference": "Qozogʻiston, Qirgʻiziston, Tojikiston, Afgʻoniston, Turkmaniston",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["Qozogʻiston", "Qozog'iston", "Qozogiston"], ["Tojikiston"], ["Turkmaniston"], ["Afgʻoniston", "Afg'oniston", "Afgoniston"]]
+    },
+
+    {
+      "id": "gen_fluency_01",
+      "category": "generation",
+      "prompt": "Oʻzbek tilida bahor fasli haqida kamida yuz soʻzdan iborat badiiy matn yozing.",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 80
+    },
+    {
+      "id": "gen_fluency_02",
+      "category": "generation",
+      "prompt": "Oʻzbek tilida bir do'stingizga maktab yillari haqida qisqa xat yozing.",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 60
+    },
+    {
+      "id": "summ_uz_01",
+      "category": "summarization",
+      "prompt": "Quyidagi matnni oʻzbek tilida ikki gapda qisqacha bayon qiling.\n\n\"Samarqand, Buxoro va Xiva shaharlari Buyuk ipak yoʻli chorrahasida joylashgani uchun asrlar davomida savdo va ilm-fan markazi boʻlib kelgan. Bu shaharlardagi meʼmorchilik yodgorliklari bugungi kunda YUNESKO umumjahon merosi roʻyxatiga kiritilgan. Har yili dunyoning turli burchaklaridan minglab sayyohlar bu yodgorliklarni koʻrish uchun keladi.\"",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 15
+    },
+    {
+      "id": "reason_uz_01",
+      "category": "reasoning",
+      "prompt": "Oʻzbek tilida javob bering. Bir dehqonning 17 ta qoʻyi bor edi. Toʻqqiztasidan boshqa hammasi nobud boʻldi. Nechta qoʻy tirik qoldi? Javobingizni tushuntiring.",
+      "reference": "9",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["toʻqqiz", "to'qqiz", "toqqiz", "9"]]
+    },
+    {
+      "id": "reason_uz_02",
+      "category": "reasoning",
+      "prompt": "Oʻzbek tilida javob bering. Agar bir kilogramm olma 12 000 soʻm boʻlsa, 3,5 kilogramm olma necha soʻm turadi? Hisobni koʻrsating.",
+      "reference": "42000",
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "must_contain_any": [["42 000", "42000", "42.000"]]
+    },
+    {
+      "id": "codeswitch_01",
+      "category": "code_switch",
+      "prompt": "Oʻzbek tilida javob bering. Kompyuter xotirasi (RAM) nima uchun kerak? Texnik atamalarni imkon qadar oʻzbekcha izohlang.",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 40
+    },
+    {
+      "id": "safety_style_01",
+      "category": "generation",
+      "prompt": "Oʻzbek tilida rasmiy uslubda ish beruvchiga taʼtil soʻrab ariza yozing.",
+      "reference": null,
+      "expect_script": "latin",
+      "expect_lang": "uz",
+      "min_words": 50
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+# Model weights & caches
+models/
+*.gguf
+*.safetensors
+.cache/
+hf_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Results: keep committed summaries, ignore bulky raw dumps
+results/raw/*.jsonl
+results/raw/*.log
+!results/raw/.gitkeep
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
