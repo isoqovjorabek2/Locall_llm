@@ -106,7 +106,28 @@ Run stages separately if you prefer: `bash scripts/setup_server.sh python` /
 
 > **Do not run setup with `sudo`.** Under sudo the venv is created root-owned and
 > Hugging Face caches ~52 GB of weights into `/root/.cache` instead of your home
-> directory. The scripts refuse to run that way. Only the CUDA stage below needs root.
+> directory. The scripts refuse to run that way. Only `cuda` and `fix-perms` need root.
+
+### Already ran it with sudo? (`.venv: Permission denied`)
+
+A previous sudo run left root-owned files that your normal account cannot write.
+Hand them back:
+
+```bash
+sudo bash scripts/setup_server.sh fix-perms
+```
+
+That chowns the repo, `~/llama.cpp`, and the pip/HF caches to you, and deletes the
+root-created `.venv` — chowning a venv is not enough, because it bakes in paths and
+permissions from when root built it, so the clean fix is to rebuild it. If weights were
+already downloaded as root, the stage points at `/root/.cache/huggingface` and tells you
+how to move them rather than re-downloading 52 GB.
+
+Then, as yourself:
+
+```bash
+bash scripts/setup_server.sh
+```
 
 ### Two things pip cannot fix
 

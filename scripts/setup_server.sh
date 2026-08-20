@@ -6,9 +6,13 @@
 #   bash scripts/setup_server.sh python      # venv + pip deps
 #   bash scripts/setup_server.sh llamacpp    # build llama.cpp (CUDA if possible)
 #   bash scripts/setup_server.sh prebuilt    # skip building: fetch CPU-only binaries
+#   sudo bash scripts/setup_server.sh cuda       # install CUDA toolkit (needs root)
+#   sudo bash scripts/setup_server.sh fix-perms  # undo an earlier sudo run
 #
-# Nothing here needs root. cmake and ninja are installed from PyPI (they ship real
-# binaries) rather than apt, so a locked-down server is fine.
+# Run every stage as YOURSELF. Only `cuda` and `fix-perms` take sudo -- the others
+# refuse to run as root, because a root-created venv breaks later pip installs and
+# sends ~52 GB of weights to /root/.cache. cmake and ninja come from PyPI (those
+# wheels ship real binaries) rather than apt, so a locked-down server is fine.
 
 set -euo pipefail
 
@@ -163,7 +167,44 @@ preflight() {
 }
 
 # ---------------------------------------------------------------------------
+# A previous sudo run leaves root-owned files behind, and the failure that
+# produces later is an opaque "Permission denied" from venv/pip. Catch it here
+# and say what to do instead.
+check_writable() {
+  local stale=""
+
+  note_stale() {
+    local path="$1"
+    stale+=$'\n'"    ${path}  (owner: $(stat -c '%U' "${path}" 2>/dev/null || echo '?'))"
+  }
+
+  [ -e "${VENV}" ] && [ ! -w "${VENV}" ] && note_stale "${VENV}"
+  [ ! -w "${REPO_ROOT}" ] && note_stale "${REPO_ROOT}"
+  [ -e "${LLAMA_DIR}" ] && [ ! -w "${LLAMA_DIR}" ] && note_stale "${LLAMA_DIR}"
+  [ -e "${HOME}/.cache/huggingface" ] && [ ! -w "${HOME}/.cache/huggingface" ] \
+    && note_stale "${HOME}/.cache/huggingface"
+
+  if [ -n "${stale}" ]; then
+    die "These paths are not writable by $(id -un):
+${stale}
+
+  They were created by an earlier sudo run. Hand them back:
+      sudo bash scripts/setup_server.sh fix-perms
+
+  Then re-run this stage as yourself (no sudo):
+      bash scripts/setup_server.sh ${STAGE}"
+  fi
+  return 0
+}
+
 setup_python() {
+  check_writable
+
+  # A root-owned venv from a previous sudo run is unusable; replace it.
+  if [ -d "${VENV}" ] && [ ! -w "${VENV}/bin" ] 2>/dev/null; then
+    die "Existing venv at ${VENV} is not writable. Run: sudo bash scripts/setup_server.sh fix-perms"
+  fi
+
   log "Creating virtualenv at ${VENV}"
   python3 -m venv "${VENV}"
   # shellcheck disable=SC1091
@@ -343,10 +384,75 @@ setup_cuda() {
   fi
 }
 
+# Undo the damage from an earlier sudo run: hand every path this project uses
+# back to the real user. Needs root (only root can chown away from root).
+fix_perms() {
+  if [ "$(id -u)" -ne 0 ]; then
+    die "This stage needs root in order to chown files away from root:
+      sudo bash scripts/setup_server.sh fix-perms"
+  fi
+
+  local target_user="${SUDO_USER:-}"
+  if [ -z "${target_user}" ] || [ "${target_user}" = "root" ]; then
+    die "Cannot tell which user to hand ownership to.
+  Invoke this via sudo from your normal account, not as a root login shell:
+      sudo bash scripts/setup_server.sh fix-perms"
+  fi
+
+  local target_group target_home
+  target_group="$(id -gn "${target_user}")"
+  target_home="$(getent passwd "${target_user}" | cut -d: -f6)"
+
+  log "Handing ownership back to ${target_user}:${target_group}"
+
+  local path
+  for path in \
+      "${REPO_ROOT}" \
+      "${target_home}/llama.cpp" \
+      "${target_home}/.cache/huggingface" \
+      "${target_home}/.cache/pip" \
+      "${target_home}/.local"; do
+    if [ -e "${path}" ]; then
+      local owner
+      owner="$(stat -c '%U' "${path}" 2>/dev/null || echo '?')"
+      if [ "${owner}" = "${target_user}" ]; then
+        ok "already ${target_user}: ${path}"
+      else
+        chown -R "${target_user}:${target_group}" "${path}"
+        ok "chowned (was ${owner}): ${path}"
+      fi
+    fi
+  done
+
+  # A root-created venv hardcodes root paths and can be subtly broken even once
+  # chowned, so remove it and let the python stage build a clean one.
+  if [ -d "${REPO_ROOT}/.venv" ]; then
+    warn "Removing ${REPO_ROOT}/.venv -- a root-created venv is not reliably"
+    warn "repaired by chown alone. The python stage will rebuild it."
+    rm -rf "${REPO_ROOT}/.venv"
+  fi
+
+  # Weights in /root/.cache are stranded: not the user's, and not where the
+  # scripts look. Point them out rather than silently leaving ~52 GB behind.
+  if [ -d /root/.cache/huggingface ]; then
+    local sz
+    sz="$(du -sh /root/.cache/huggingface 2>/dev/null | cut -f1)"
+    warn "/root/.cache/huggingface exists (${sz}) -- weights downloaded as root."
+    warn "To reclaim instead of re-downloading:"
+    warn "  mv /root/.cache/huggingface ${target_home}/.cache/"
+    warn "  chown -R ${target_user}:${target_group} ${target_home}/.cache/huggingface"
+  fi
+
+  echo
+  log "Done. Now run as yourself, without sudo:"
+  echo "  bash scripts/setup_server.sh"
+}
+
 # ---------------------------------------------------------------------------
 case "${STAGE}" in
-  preflight) preflight ;;
-  cuda)      setup_cuda ;;
+  preflight)  preflight ;;
+  cuda)       setup_cuda ;;
+  fix-perms)  fix_perms ;;
   python)    refuse_sudo; setup_python ;;
   llamacpp)  refuse_sudo; setup_llamacpp ;;
   prebuilt)  refuse_sudo; setup_prebuilt ;;
@@ -356,7 +462,7 @@ case "${STAGE}" in
     setup_python
     setup_llamacpp || warn "llama.cpp build failed -- try: bash scripts/setup_server.sh prebuilt"
     ;;
-  *) echo "Unknown stage: ${STAGE} (use: preflight | cuda | python | llamacpp | prebuilt | all)"; exit 1 ;;
+  *) echo "Unknown stage: ${STAGE} (use: preflight | fix-perms | cuda | python | llamacpp | prebuilt | all)"; exit 1 ;;
 esac
 
 log "Setup complete"
