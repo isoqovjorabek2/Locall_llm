@@ -52,13 +52,47 @@ def require_gemma4_support():
 
     version = getattr(transformers, "__version__", "unknown")
 
-    have_model_class = True
+    # Compare numerically. String comparison would rank "5.15" below "5.5",
+    # and report a NEWER transformers as too old.
+    def _parse(v):
+        parts = []
+        for chunk in str(v).split(".")[:3]:
+            digits = ""
+            for ch in chunk:
+                if ch.isdigit():
+                    digits += ch
+                else:
+                    break
+            parts.append(int(digits) if digits else 0)
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts)
+
+    installed = _parse(version)
+    required = _parse(MIN_TRANSFORMERS)
+    version_ok = version != "unknown" and installed >= required
+
+    if not version_ok:
+        sys.exit(
+            "This transformers is too old for Gemma 4.\n\n"
+            "  installed: " + version + "\n"
+            "  required:  >= " + MIN_TRANSFORMERS + "  (adds model_type 'gemma4',\n"
+            "             Gemma4Processor and Gemma4ForConditionalGeneration)\n\n"
+            "Fix:\n"
+            "  source .venv/bin/activate\n"
+            "  pip install -U 'transformers>=" + MIN_TRANSFORMERS + "'\n\n"
+            "Note transformers 5.x is a major release; reinstall from requirements.txt\n"
+            "if other packages complain:\n"
+            "  pip install -r requirements.txt"
+        )
+
+    model_class_error = None
     try:
         from transformers import Gemma4ForConditionalGeneration  # noqa: F401
-    except ImportError:
-        have_model_class = False
+    except ImportError as exc:
+        model_class_error = exc
 
-    if have_model_class:
+    if model_class_error is None:
         # The model class existing is not enough. Gemma 4 is multimodal, and
         # Gemma4Processor pulls in torchvision. When that is missing,
         # transformers swallows the real ImportError and reports
@@ -89,17 +123,29 @@ def require_gemma4_support():
                 "  pip install -r requirements.txt"
             )
 
+    # Version is new enough, so "too old" would be the wrong answer. Report what
+    # actually failed. A missing peer dependency shows up here too, because
+    # transformers resolves model classes lazily.
+    missing = getattr(model_class_error, "name", None)
+    hint = ""
+    if missing and "torchvision" in str(missing):
+        hint = (
+            "\nInstall it from the same index as torch:\n"
+            "  source .venv/bin/activate\n"
+            "  pip install torchvision --index-url "
+            "https://download.pytorch.org/whl/cu128\n"
+        )
     sys.exit(
-        "This transformers is too old for Gemma 4.\n\n"
-        "  installed: " + version + "\n"
-        "  required:  >= " + MIN_TRANSFORMERS + "  (adds model_type 'gemma4',\n"
-        "             Gemma4Processor and Gemma4ForConditionalGeneration)\n\n"
-        "Fix:\n"
-        "  source .venv/bin/activate\n"
-        "  pip install -U 'transformers>=" + MIN_TRANSFORMERS + "'\n\n"
-        "Note transformers 5.x is a major release; reinstall from requirements.txt\n"
-        "if other packages complain:\n"
-        "  pip install -r requirements.txt"
+        "transformers " + version + " is new enough for Gemma 4 (>= "
+        + MIN_TRANSFORMERS + "), but Gemma4ForConditionalGeneration\n"
+        "could not be imported.\n\n"
+        "  error:          " + type(model_class_error).__name__ + ": "
+        + str(model_class_error) + "\n"
+        "  missing module: " + str(missing or "unclear") + "\n\n"
+        "transformers resolves model classes lazily, so a missing peer dependency\n"
+        "surfaces here rather than at import time.\n" + hint +
+        "\nReinstall the full set:\n"
+        "  source .venv/bin/activate && pip install -r requirements.txt"
     )
 
 # ---------------------------------------------------------------------------
