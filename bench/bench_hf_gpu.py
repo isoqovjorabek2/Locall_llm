@@ -1,13 +1,17 @@
-"""GPU benchmark: Gemma 4 26B-A4B via transformers on the A40s.
+"""GPU benchmark: any transformers model on the A40s.
 
 Track B ("best realistic GPU deployment"): bf16 weights sharded across both
 A40s with accelerate's device_map. Optionally 8-bit/4-bit to fit a single card.
 
+The model class is resolved from the checkpoint's own config, so this works
+with any architecture the installed transformers knows about -- no per-model
+code here.
+
 Usage:
-    python bench/bench_hf_gpu.py                     # bf16, both GPUs
-    python bench/bench_hf_gpu.py --gpus 1            # bf16, GPU 1 only (needs quant)
-    python bench/bench_hf_gpu.py --load-4bit --gpus 1
-    python bench/bench_hf_gpu.py --reserve-mib 8000  # leave room for other users
+    python bench/bench_hf_gpu.py                          # default model, bf16
+    python bench/bench_hf_gpu.py --model Qwen/Qwen3.8-27B --tag qwen38-27b
+    python bench/bench_hf_gpu.py --gpus 1 --load-4bit     # single card
+    python bench/bench_hf_gpu.py --reserve-mib 10000      # busy shared box
 """
 from __future__ import annotations
 
@@ -27,15 +31,17 @@ from bench.common import (  # noqa: E402
     build_prompt,
     gpu_inventory,
     host_info,
+    apply_chat,
+    load_processor,
     make_record,
-    require_gemma4_support,
+    resolve_model_class,
     write_meta,
     write_records,
 )
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Benchmark Gemma 4 26B-A4B on GPU")
+    p = argparse.ArgumentParser(description="Benchmark any HF model on GPU")
     p.add_argument("--model", default=MODEL_ID)
     p.add_argument(
         "--gpus",
@@ -55,6 +61,18 @@ def parse_args():
     p.add_argument("--warmup", type=int, default=1)
     p.add_argument("--repeats", type=int, default=3, help="Timed runs per case")
     p.add_argument("--out", default="gpu_transformers.jsonl")
+    p.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow the checkpoint to execute its own modelling code. Only for "
+        "publishers you trust.",
+    )
+    p.add_argument(
+        "--tag",
+        default="",
+        help="Label for this run (default: derived from the model id). Lets "
+        "several models be compared in one report.",
+    )
     return p.parse_args()
 
 
@@ -81,15 +99,28 @@ def build_max_memory(gpu_indices, reserve_mib):
 def main():
     args = parse_args()
 
+    # One results file per model, so several models coexist in one report.
+    tag = args.tag or args.model.rstrip("/").split("/")[-1]
+    out_name = args.out
+    if out_name == "gpu_transformers.jsonl":
+        out_name = "gpu_transformers_" + tag.replace("/", "_") + ".jsonl"
+
     gpu_indices = [int(x) for x in args.gpus.split(",") if x.strip() != ""]
     max_memory = build_max_memory(gpu_indices, args.reserve_mib)
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in gpu_indices)
 
-    require_gemma4_support()
-
     import torch  # noqa: E402  (import after CUDA_VISIBLE_DEVICES is set)
-    from transformers import AutoProcessor, TextIteratorStreamer
-    from transformers import Gemma4ForConditionalGeneration as ModelCls
+    from transformers import TextIteratorStreamer
+
+    # Model class comes from the checkpoint's own config, so any architecture
+    # this transformers knows about works without changes here.
+    ModelCls, model_config, arch = resolve_model_class(
+        args.model, trust_remote_code=args.trust_remote_code
+    )
+    print(
+        "[info] architecture: " + str(arch)
+        + "  (model_type " + str(getattr(model_config, "model_type", "?")) + ")"
+    )
 
     if not torch.cuda.is_available():
         sys.exit("CUDA is not available -- this script is the GPU track.")
@@ -115,7 +146,9 @@ def main():
     print("[info] per-GPU budget: " + str(max_memory))
     load_start = time.perf_counter()
 
-    processor = AutoProcessor.from_pretrained(args.model)
+    processor, tokenizer = load_processor(
+        args.model, trust_remote_code=args.trust_remote_code
+    )
     load_kwargs = dict(
         device_map="auto",
         max_memory=max_memory,
@@ -125,6 +158,8 @@ def main():
         load_kwargs["quantization_config"] = quant_cfg
     else:
         load_kwargs["dtype"] = torch.bfloat16
+    if args.trust_remote_code:
+        load_kwargs["trust_remote_code"] = True
 
     model = ModelCls.from_pretrained(args.model, **load_kwargs)
     model.eval()
@@ -132,22 +167,10 @@ def main():
     print("[info] loaded in " + str(round(load_s, 1)) + "s")
     print("[info] device map: " + str(getattr(model, "hf_device_map", "n/a")))
 
-    tokenizer = getattr(processor, "tokenizer", processor)
-
     def encode(prompt_text):
-        messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text}]}]
-        # Thinking mode is disabled so token counts reflect the answer only.
-        for kwargs in (
-            dict(add_generation_prompt=True, tokenize=True, return_dict=True,
-                 return_tensors="pt", enable_thinking=False),
-            dict(add_generation_prompt=True, tokenize=True, return_dict=True,
-                 return_tensors="pt"),
-        ):
-            try:
-                return processor.apply_chat_template(messages, **kwargs)
-            except (TypeError, ValueError):
-                continue
-        raise RuntimeError("Could not apply chat template")
+        # Thinking mode is disabled where supported, so token counts reflect
+        # the answer rather than hidden reasoning.
+        return apply_chat(processor, prompt_text)
 
     def run_once(prompt_text, max_new_tokens):
         inputs = encode(prompt_text)
@@ -200,6 +223,7 @@ def main():
                 backend="transformers",
                 device="gpu",
                 precision=precision,
+                model=args.model,
                 case=case_name,
                 prompt_tokens=n_prompt,
                 generated_tokens=n_gen,
@@ -208,8 +232,10 @@ def main():
                 telemetry=tele.summary(),
                 extra={
                     "run_index": run_idx,
+                    "tag": tag,
                     "gpus": gpu_indices,
                     "attn": args.attn,
+                    "architecture": arch,
                     "load_seconds": round(load_s, 1),
                     "device_map": str(getattr(model, "hf_device_map", "")),
                 },
@@ -222,7 +248,7 @@ def main():
                 + "TTFT " + str(rec["ttft_s"]) + "s"
             )
 
-    path = write_records(records, args.out)
+    path = write_records(records, out_name)
     write_meta(host_info(), "host_gpu.json")
     print("[done] wrote " + str(path))
 

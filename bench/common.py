@@ -22,17 +22,81 @@ RESULTS_DIR = REPO_ROOT / "results" / "raw"
 
 MODEL_ID = "google/gemma-4-26B-A4B-it"
 
-# Gemma 4 support (model_type "gemma4") landed in transformers 5.5.0.
-MIN_TRANSFORMERS = "5.5.0"
 
+def _root_cause(exc):
+    """Walk to the original exception.
 
-def require_gemma4_support():
-    """Fail fast, and legibly, if transformers is too old for Gemma 4.
-
-    Without this the failure surfaces deep inside AutoProcessor as
-    "Could not import module 'Gemma4Processor'", which does not point at the
-    actual problem (an outdated transformers).
+    transformers catches a peer dependency's ImportError and re-raises its own
+    "Could not import module 'X'", which drops exc.name and names the class it
+    was building rather than the module that was actually absent.
     """
+    seen = set()
+    cur = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        nxt = cur.__cause__ or cur.__context__
+        if nxt is None:
+            break
+        cur = nxt
+    return cur
+
+
+def _dependency_report(exc):
+    """Human-readable diagnosis for an import failure inside transformers."""
+    root = _root_cause(exc)
+    missing = getattr(root, "name", None)
+    if not missing:
+        text = str(root)
+        for candidate in ("torchvision", "torchaudio", "PIL", "timm", "av",
+                          "sentencepiece", "protobuf", "einops",
+                          "causal_conv1d", "flash_attn"):
+            if candidate in text:
+                missing = candidate
+                break
+
+    probe_lines = []
+    for mod in ("torch", "torchvision", "PIL", "accelerate"):
+        try:
+            imported = __import__(mod)
+            probe_lines.append(
+                "    " + mod.ljust(14) + " "
+                + str(getattr(imported, "__version__", "installed"))
+            )
+        except Exception as probe_exc:  # noqa: BLE001 - reporting, not handling
+            probe_lines.append(
+                "    " + mod.ljust(14) + " MISSING (" + type(probe_exc).__name__ + ")"
+            )
+
+    root_text = str(root) + " " + str(exc)
+    abi_mismatch = (
+        "does not exist" in root_text and "torchvision::" in root_text
+    ) or "undefined symbol" in root_text
+
+    if abi_mismatch:
+        hint = (
+            "\nThis is a torch/torchvision ABI MISMATCH, not a missing package.\n"
+            "Install the pair together from one index:\n"
+            "  bash scripts/setup_server.sh torch\n"
+        )
+    elif missing:
+        hint = (
+            "\nInstall the missing dependency:\n"
+            "  source .venv/bin/activate && pip install " + str(missing) + "\n"
+            "(if it is torch or torchvision: bash scripts/setup_server.sh torch)\n"
+        )
+    else:
+        hint = ""
+
+    return (
+        "  transformers said: " + str(exc) + "\n"
+        "  root cause:        " + type(root).__name__ + ": " + str(root) + "\n"
+        "  missing module:    " + str(missing or "see root cause above") + "\n\n"
+        "  currently importable:\n" + "\n".join(probe_lines) + "\n" + hint
+    )
+
+
+def require_transformers():
+    """Import transformers, or exit with a message naming the real problem."""
     import sys
 
     try:
@@ -42,173 +106,165 @@ def require_gemma4_support():
             "transformers could not be imported: " + str(exc) + "\n"
             "  source .venv/bin/activate && pip install -r requirements.txt"
         )
-    except Exception as exc:  # installed but broken (bad deps, partial install)
+    except Exception as exc:  # installed but broken
         sys.exit(
             "transformers is installed but fails to import:\n"
             "  " + type(exc).__name__ + ": " + str(exc) + "\n\n"
             "Reinstall it inside the venv:\n"
             "  source .venv/bin/activate && pip install -r requirements.txt"
         )
+    return getattr(transformers, "__version__", "unknown")
 
-    version = getattr(transformers, "__version__", "unknown")
 
-    # Compare numerically. String comparison would rank "5.15" below "5.5",
-    # and report a NEWER transformers as too old.
-    def _parse(v):
-        parts = []
-        for chunk in str(v).split(".")[:3]:
-            digits = ""
-            for ch in chunk:
-                if ch.isdigit():
-                    digits += ch
-                else:
-                    break
-            parts.append(int(digits) if digits else 0)
-        while len(parts) < 3:
-            parts.append(0)
-        return tuple(parts)
+def resolve_model_class(model_id, trust_remote_code=False):
+    """Pick the right model class for ANY model, from its own config.
 
-    installed = _parse(version)
-    required = _parse(MIN_TRANSFORMERS)
-    version_ok = version != "unknown" and installed >= required
+    Reads architectures[0] out of the checkpoint's config and looks it up in
+    transformers. This is what makes the harness model-agnostic: Gemma 4 needs
+    Gemma4ForConditionalGeneration, Qwen3.5 needs Qwen3_5ForConditionalGeneration,
+    a plain Llama needs LlamaForCausalLM -- all resolved the same way, with no
+    per-model branching to maintain.
 
-    if not version_ok:
-        sys.exit(
-            "This transformers is too old for Gemma 4.\n\n"
-            "  installed: " + version + "\n"
-            "  required:  >= " + MIN_TRANSFORMERS + "  (adds model_type 'gemma4',\n"
-            "             Gemma4Processor and Gemma4ForConditionalGeneration)\n\n"
-            "Fix:\n"
-            "  source .venv/bin/activate\n"
-            "  pip install -U 'transformers>=" + MIN_TRANSFORMERS + "'\n\n"
-            "Note transformers 5.x is a major release; reinstall from requirements.txt\n"
-            "if other packages complain:\n"
-            "  pip install -r requirements.txt"
-        )
+    Returns (ModelCls, config, architecture_name).
+    """
+    import sys
 
-    model_class_error = None
+    version = require_transformers()
+    import transformers
+    from transformers import AutoConfig
+
     try:
-        from transformers import Gemma4ForConditionalGeneration  # noqa: F401
-    except ImportError as exc:
-        model_class_error = exc
+        config = AutoConfig.from_pretrained(
+            model_id, trust_remote_code=trust_remote_code
+        )
+    except Exception as exc:  # noqa: BLE001
+        root = _root_cause(exc)
+        extra = ""
+        if "trust_remote_code" in (str(exc) + str(root)):
+            extra = (
+                "\nThis checkpoint ships custom modelling code. Re-run with\n"
+                "  --trust-remote-code\n"
+                "only if you trust the publisher -- it executes their Python.\n"
+            )
+        sys.exit(
+            "Could not read the config for " + str(model_id) + "\n\n"
+            "  transformers: " + version + "\n"
+            "  error:        " + type(exc).__name__ + ": " + str(exc) + "\n" + extra
+            + "\nIf the id is wrong, check it on huggingface.co. If the model is\n"
+            "newer than your transformers, upgrade:\n"
+            "  source .venv/bin/activate && pip install -U transformers"
+        )
 
-    if model_class_error is None:
-        # The model class existing is not enough. Gemma 4 is multimodal, and
-        # Gemma4Processor pulls in torchvision. When that is missing,
-        # transformers swallows the real ImportError and reports
-        # "Could not import module 'Gemma4Processor'", which sends you looking
-        # at the wrong library entirely. Import the processor here so the
-        # missing peer dependency is named.
+    arch_list = getattr(config, "architectures", None) or []
+    arch = arch_list[0] if arch_list else None
+    model_type = getattr(config, "model_type", "unknown")
+
+    if arch and hasattr(transformers, arch):
         try:
-            from transformers.models.gemma4 import processing_gemma4  # noqa: F401
-            return version
-        except ImportError as exc:
-            missing = getattr(exc, "name", None) or str(exc)
-            hint = ""
-            if "torchvision" in str(exc):
-                hint = (
-                    "\nInstall it from the same index as torch:\n"
-                    "  source .venv/bin/activate\n"
-                    "  pip install torchvision --index-url "
-                    "https://download.pytorch.org/whl/cu128\n"
-                )
+            return getattr(transformers, arch), config, arch
+        except Exception as exc:  # noqa: BLE001 - lazy resolution fails here
             sys.exit(
-                "transformers " + version + " has Gemma 4, but its processor "
-                "cannot be imported.\n\n"
-                "  missing module: " + str(missing) + "\n"
-                "  raised by:      transformers/models/gemma4/processing_gemma4.py\n\n"
-                "Gemma 4 is multimodal, so the processor needs the vision stack even "
-                "for text-only use.\n" + hint +
-                "\nOr reinstall everything:\n"
-                "  pip install -r requirements.txt"
+                "transformers " + version + " lists " + str(arch)
+                + " but could not import it.\n\n" + _dependency_report(exc)
             )
 
-    # Version is new enough, so "too old" would be the wrong answer.
-    #
-    # transformers re-raises peer-dependency failures as its own
-    # ModuleNotFoundError("Could not import module 'X'"), which drops exc.name
-    # and names the class it was trying to build rather than the module that
-    # was actually absent. Walk the __cause__/__context__ chain to the original
-    # exception, and probe the vision stack directly, so the answer is concrete.
-    def _root_cause(exc):
-        seen = set()
-        cur = exc
-        while cur is not None and id(cur) not in seen:
-            seen.add(id(cur))
-            nxt = cur.__cause__ or cur.__context__
-            if nxt is None:
-                break
-            cur = nxt
-        return cur
-
-    root = _root_cause(model_class_error)
-    missing = getattr(root, "name", None)
-    if not missing:
-        text = str(root)
-        for candidate in ("torchvision", "torchaudio", "PIL", "pillow",
-                          "timm", "av", "sentencepiece", "protobuf"):
-            if candidate in text:
-                missing = candidate
-                break
-
-    # Direct probe: report what is actually importable right now.
-    probe_lines = []
-    for mod in ("torch", "torchvision", "PIL", "accelerate"):
-        try:
-            imported = __import__(mod)
-            probe_lines.append(
-                "    " + mod.ljust(14) + " "
-                + str(getattr(imported, "__version__", "installed"))
-            )
-        except Exception as exc:  # noqa: BLE001 - reporting, not handling
-            probe_lines.append(
-                "    " + mod.ljust(14) + " MISSING (" + type(exc).__name__ + ")"
-            )
-
-    # A torch/torchvision ABI mismatch is not a missing module: torchvision is
-    # present but its compiled extension was linked against a different torch,
-    # so its custom operators never register. Reinstalling torchvision alone
-    # does not fix it -- the pair has to come from one index together.
-    root_text = str(root) + " " + str(model_class_error)
-    abi_mismatch = (
-        "does not exist" in root_text and "torchvision::" in root_text
-    ) or "undefined symbol" in root_text
-
-    if abi_mismatch:
-        hint = (
-            "\nThis is a torch/torchvision ABI MISMATCH, not a missing package.\n"
-            "torchvision is installed, but its compiled extension was built against\n"
-            "a different torch, so operators like torchvision::nms never register.\n"
-            "Reinstalling torchvision on its own will not fix it -- install the pair\n"
-            "together from one index:\n\n"
-            "  source .venv/bin/activate\n"
-            "  pip install --force-reinstall --no-cache-dir torch torchvision \\\n"
-            "      --index-url https://download.pytorch.org/whl/cu128\n"
-        )
-    elif missing and "torchvision" in str(missing):
-        hint = (
-            "\ntorchvision is the one to install, matching your torch build:\n"
-            "  source .venv/bin/activate\n"
-            "  pip install torch torchvision --index-url "
-            "https://download.pytorch.org/whl/cu128\n"
-        )
-    else:
-        hint = ""
+    # Architecture unknown to this transformers: usually too old for the model.
+    try:
+        from transformers import AutoModelForCausalLM
+        return AutoModelForCausalLM, config, (arch or "AutoModelForCausalLM")
+    except Exception:  # noqa: BLE001
+        pass
 
     sys.exit(
-        "transformers " + version + " is new enough for Gemma 4 (>= "
-        + MIN_TRANSFORMERS + "), but Gemma4ForConditionalGeneration\n"
-        "could not be imported.\n\n"
-        "  transformers said: " + str(model_class_error) + "\n"
-        "  root cause:        " + type(root).__name__ + ": " + str(root) + "\n"
-        "  missing module:    " + str(missing or "see root cause above") + "\n\n"
-        "  currently importable:\n" + "\n".join(probe_lines) + "\n\n"
-        "transformers resolves model classes lazily and rewrites the underlying\n"
-        "ImportError, which is why its own message names the class rather than\n"
-        "the missing module.\n" + hint +
-        "\nReinstall the full set:\n"
-        "  source .venv/bin/activate && pip install -r requirements.txt"
+        "transformers " + version + " does not know how to build this model.\n\n"
+        "  model:         " + str(model_id) + "\n"
+        "  model_type:    " + str(model_type) + "\n"
+        "  architectures: " + str(arch_list or "(none listed)") + "\n\n"
+        "That architecture is not exposed by this transformers, which usually\n"
+        "means the library predates the model. Upgrade:\n"
+        "  source .venv/bin/activate && pip install -U transformers\n\n"
+        "If the checkpoint ships its own modelling code, pass --trust-remote-code\n"
+        "(only if you trust the publisher -- it executes their Python)."
     )
+
+
+def load_processor(model_id, trust_remote_code=False):
+    """Return (processor_or_tokenizer, tokenizer).
+
+    Multimodal checkpoints expose an AutoProcessor; text-only ones only have a
+    tokenizer. Try the processor first and fall back, so both work unchanged.
+    """
+    import sys
+
+    require_transformers()
+    from transformers import AutoProcessor, AutoTokenizer
+
+    processor = None
+    try:
+        processor = AutoProcessor.from_pretrained(
+            model_id, trust_remote_code=trust_remote_code
+        )
+    except Exception as exc:  # noqa: BLE001
+        root_text = str(_root_cause(exc)) + " " + str(exc)
+        # A real dependency failure must not be mistaken for "text-only".
+        if "torchvision" in root_text or "undefined symbol" in root_text:
+            sys.exit(
+                "The processor for " + str(model_id) + " could not be loaded.\n\n"
+                + _dependency_report(exc)
+            )
+
+    if processor is None:
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id, trust_remote_code=trust_remote_code
+            )
+        except Exception as exc:  # noqa: BLE001
+            sys.exit(
+                "Could not load a processor or tokenizer for " + str(model_id)
+                + "\n\n" + _dependency_report(exc)
+            )
+        return tokenizer, tokenizer
+
+    return processor, getattr(processor, "tokenizer", processor)
+
+
+def apply_chat(processor, prompt_text):
+    """Build model inputs from one user turn, across processor/tokenizer APIs.
+
+    Tries the multimodal content-list form first, then plain string content,
+    and disables thinking mode where supported so token counts reflect the
+    answer rather than hidden reasoning.
+    """
+    multimodal = [{"role": "user", "content": [{"type": "text", "text": prompt_text}]}]
+    plain = [{"role": "user", "content": prompt_text}]
+
+    attempts = []
+    for messages in (multimodal, plain):
+        for extra in ({"enable_thinking": False}, {}):
+            kwargs = dict(
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+            kwargs.update(extra)
+            attempts.append((messages, kwargs))
+
+    last_error = None
+    for messages, kwargs in attempts:
+        try:
+            out = processor.apply_chat_template(messages, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - probing API shapes
+            last_error = exc
+            continue
+        if hasattr(out, "keys"):
+            return out
+        return {"input_ids": out}
+
+    raise RuntimeError(
+        "Could not apply this model's chat template: " + repr(last_error)
+    )
+
 
 # ---------------------------------------------------------------------------
 # Benchmark prompt set
@@ -437,6 +493,7 @@ def make_record(
     total_s: float,
     telemetry: dict,
     extra: dict = None,
+    model: str = None,
 ) -> dict:
     """One measured generation.
 
@@ -451,7 +508,7 @@ def make_record(
         "device": device,        # "gpu" | "cpu"
         "precision": precision,  # "bf16" | "Q4_K_M" | "int4" ...
         "case": case,
-        "model": MODEL_ID,
+        "model": model or MODEL_ID,
         "prompt_tokens": prompt_tokens,
         "generated_tokens": generated_tokens,
         "ttft_s": round(ttft_s, 4),

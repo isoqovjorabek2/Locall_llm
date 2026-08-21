@@ -55,6 +55,36 @@ nvidia-smi
 
 ---
 
+## Testing other models
+
+The harness is model-agnostic. The model class is resolved from the checkpoint's own
+config (`architectures[0]`), so any architecture your transformers knows about works
+with no code changes:
+
+```bash
+python bench/bench_hf_gpu.py --model Qwen/Qwen3.8-27B --tag qwen38-27b
+python eval/run_uzbek_eval.py --backend hf --model Qwen/Qwen3.8-27B --tag qwen38-27b
+python analyze/make_report.py
+```
+
+Results are written per model, so several appear side by side in one report with a
+head-to-head throughput table.
+
+**Match the precision when comparing.** A bf16 model against a 4-bit one measures
+quantisation as much as the models themselves — and low-resource languages like Uzbek
+degrade under quantisation faster than English does, so an unmatched comparison will
+flatter the bf16 side. Either run both at the same precision, or say plainly in the
+write-up that they differ.
+
+**Dense vs MoE changes the memory story.** Gemma 4 26B is MoE (25.2 B stored, 3.8 B
+active). A dense 27 B stores and computes all 27 B: ~54 GB at bf16, so it needs both
+A40s free, versus ~14 GB at 4-bit. Check `nvidia-smi` before choosing.
+
+`--trust-remote-code` is available for checkpoints that ship their own modelling code.
+It executes the publisher's Python, so use it only for publishers you trust.
+
+---
+
 ## Two tracks, and why
 
 Comparing "GPU in bf16" against "CPU in Q4" would conflate two variables — hardware

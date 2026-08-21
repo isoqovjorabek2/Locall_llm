@@ -50,6 +50,12 @@ def parse_args():
     p.add_argument("--categories", default="",
                    help="Comma-separated category filter (default: all)")
     p.add_argument("--suite", default="")
+    p.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow the checkpoint to execute its own modelling code. Only for "
+        "publishers you trust.",
+    )
     return p.parse_args()
 
 
@@ -66,13 +72,19 @@ def make_hf_generator(args):
     max_memory = build_max_memory(gpu_indices, args.reserve_mib)
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in gpu_indices)
 
-    from bench.common import require_gemma4_support
-
-    require_gemma4_support()
+    from bench.common import apply_chat, load_processor, resolve_model_class
 
     import torch
-    from transformers import AutoProcessor
-    from transformers import Gemma4ForConditionalGeneration as ModelCls
+
+    # Model class comes from the checkpoint's own config, so this runs against
+    # any architecture the installed transformers knows about.
+    ModelCls, model_config, arch = resolve_model_class(
+        args.model, trust_remote_code=args.trust_remote_code
+    )
+    print(
+        "[info] architecture: " + str(arch)
+        + "  (model_type " + str(getattr(model_config, "model_type", "?")) + ")"
+    )
 
     load_kwargs = dict(device_map="auto", max_memory=max_memory, attn_implementation="sdpa")
     precision = "bf16"
@@ -91,29 +103,18 @@ def make_hf_generator(args):
     else:
         load_kwargs["dtype"] = torch.bfloat16
 
+    if args.trust_remote_code:
+        load_kwargs["trust_remote_code"] = True
+
     print("[info] loading " + args.model + " (" + precision + ")")
-    processor = AutoProcessor.from_pretrained(args.model)
+    processor, tokenizer = load_processor(
+        args.model, trust_remote_code=args.trust_remote_code
+    )
     model = ModelCls.from_pretrained(args.model, **load_kwargs)
     model.eval()
-    tokenizer = getattr(processor, "tokenizer", processor)
 
     def generate(prompt: str) -> str:
-        messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-        inputs = None
-        for kwargs in (
-            dict(add_generation_prompt=True, tokenize=True, return_dict=True,
-                 return_tensors="pt", enable_thinking=False),
-            dict(add_generation_prompt=True, tokenize=True, return_dict=True,
-                 return_tensors="pt"),
-        ):
-            try:
-                inputs = processor.apply_chat_template(messages, **kwargs)
-                break
-            except (TypeError, ValueError):
-                continue
-        if inputs is None:
-            raise RuntimeError("Could not apply chat template")
-
+        inputs = apply_chat(processor, prompt)
         inputs = {k: v.to(model.device) for k, v in inputs.items() if hasattr(v, "to")}
         n_prompt = int(inputs["input_ids"].shape[-1])
         gen_kwargs = dict(max_new_tokens=args.max_new_tokens)
@@ -185,6 +186,7 @@ def main():
         rows.append({
             "tag": args.tag,
             "backend": args.backend,
+            "model": args.model,
             "precision": precision,
             "id": item["id"],
             "category": item["category"],
